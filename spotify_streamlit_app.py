@@ -2,11 +2,11 @@ import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from collections import defaultdict
-import pandas as pd  # Added for CSV handling
+import pandas as pd
 import io
 
 # Page config
-st.set_page_config(page_title="Spotify Duplicate Finder", page_icon="🎵")
+st.set_page_config(page_title="Spotify Duplicate Finder", page_icon="🎵", layout="wide")
 
 # Title
 st.title("🎵 Spotify Duplicate Finder")
@@ -17,6 +17,7 @@ with st.sidebar:
     st.header("App Controls")
     
     def reset_app():
+        # Clear cache and reset the input field
         st.cache_resource.clear()
         if 'playlist_input' in st.session_state:
             st.session_state['playlist_input'] = ""
@@ -25,7 +26,7 @@ with st.sidebar:
     if st.button("🔄 Refresh / Clear All"):
         reset_app()
         
-    st.info("This will clear the current results and reset the search box.")
+    st.info("Clears current results and resets the search box.")
 
 # Spotify credentials
 try:
@@ -80,13 +81,18 @@ def find_duplicates(tracks):
 
 # --- MAIN UI ---
 st.write("---")
-playlist_url = st.text_input("Enter Spotify Playlist URL or ID:", key="playlist_input")
+playlist_url = st.text_input(
+    "Enter Spotify Playlist URL or ID:", 
+    placeholder="https://open.spotify.com/playlist/...",
+    key="playlist_input"
+)
 
 if st.button("🔍 Find Duplicates", type="primary"):
     if not playlist_url:
         st.error("Please enter a playlist URL or ID")
     else:
         try:
+            # Robust extraction logic
             if 'spotify.com' in playlist_url:
                 playlist_id = playlist_url.split('/')[-1].split('?')[0]
             else:
@@ -101,73 +107,86 @@ if st.button("🔍 Find Duplicates", type="primary"):
                     exact, similar = find_duplicates(tracks)
                     st.success("✅ Analysis complete!")
                     
-                    # --- DATA PREPARATION FOR EXPORT ---
+                    # 1. SUMMARY METRICS
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Total Tracks", len(tracks))
+                    col2.metric("Exact Duplicates", len(exact))
+                    col3.metric("Similar Tracks", len(similar))
+
+                    # 2. PREPARE DATA FOR PANDAS DISPLAY & EXPORT
                     all_dupes_list = []
-                    
-                    # Process exact for export
+                    # Exact
                     for tid, dupes in exact.items():
                         for d in dupes:
                             all_dupes_list.append({**d, 'Type': 'Exact (Same ID)'})
-                    
-                    # Process similar for export
+                    # Similar
                     for key, dupes in similar.items():
                         for d in dupes:
-                            # Avoid adding if already added via 'exact'
+                            # Avoid duplicates in the dataframe if they were already caught by 'exact'
                             if not any(x['id'] == d['id'] and x['position'] == d['position'] for x in all_dupes_list):
                                 all_dupes_list.append({**d, 'Type': 'Similar (Name/Artist)'})
 
-                    if all_dupes_list:
+                    if not exact and not similar:
+                        st.info("🎉 No duplicates found! Your playlist is clean.")
+                    else:
+                        # Create DataFrame
                         df = pd.DataFrame(all_dupes_list)
-                        # Reorder columns for better readability in CSV
-                        df = df[['position', 'name', 'artist', 'album', 'Type', 'id', 'added_at']]
+                        df = df[['position', 'name', 'artist', 'album', 'Type', 'id']]
+                        df.columns = ['Pos', 'Track Name', 'Artist', 'Album', 'Match Type', 'Spotify ID']
+
+                        # 3. VISUAL RESULTS (Expanders)
+                        st.write("---")
+                        st.subheader("🎵 Grouped Results")
+                        tab1, tab2 = st.tabs(["❌ Exact Duplicates", "⚠️ Similar Tracks"])
                         
+                        with tab1:
+                            if exact:
+                                for tid, dupes in exact.items():
+                                    first = dupes[0]
+                                    with st.expander(f"{first['name']} - {first['artist']}"):
+                                        for d in dupes:
+                                            st.write(f"• **Position {d['position']}** | Album: {d['album']}")
+                            else:
+                                st.write("No exact duplicates found.")
+
+                        with tab2:
+                            if similar:
+                                for key, dupes in similar.items():
+                                    first = dupes[0]
+                                    with st.expander(f"{first['name']} - {first['artist']}"):
+                                        for d in dupes:
+                                            st.write(f"• **Position {d['position']}** | Album: {d['album']}")
+                            else:
+                                st.write("No similar tracks found.")
+
+                        # 4. DATA TABLE PREVIEW (Pandas Display)
+                        st.write("---")
+                        st.subheader("📋 Data Preview")
+                        st.write("Scroll through the table below to see all duplicate entries:")
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+
+                        # 5. EXPORT OPTIONS
                         st.write("---")
                         st.subheader("💾 Export Results")
                         
-                        col_dl1, col_dl2 = st.columns(2)
+                        col_dl1, col_dl2, col_dl3 = st.columns(3)
                         
+                        # Prepare Text Export
+                        export_text = "SPOTIFY DUPLICATE REPORT\n" + "="*25 + "\n\n"
+                        for _, row in df.iterrows():
+                            export_text += f"[{row['Match Type']}] Pos: {row['Pos']} | {row['Track Name']} - {row['Artist']} ({row['Album']})\n"
+
                         with col_dl1:
-                            # 1. CSV Download
                             csv_data = df.to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label="📊 Download as CSV",
-                                data=csv_data,
-                                file_name="spotify_duplicates.csv",
-                                mime="text/csv",
-                                use_container_width=True
-                            )
+                            st.download_button("📊 Download CSV", csv_data, "duplicates.csv", "text/csv", use_container_width=True)
                         
                         with col_dl2:
-                            # 2. Text Download
-                            export_text = "SPOTIFY DUPLICATE REPORT\n" + "="*25 + "\n\n"
-                            for _, row in df.iterrows():
-                                export_text += f"[{row['Type']}] Pos: {row['position']} | {row['name']} - {row['artist']} ({row['album']})\n"
-                            
-                            st.download_button(
-                                label="📥 Download as TXT",
-                                data=export_text,
-                                file_name="spotify_duplicates.txt",
-                                mime="text/plain",
-                                use_container_width=True
-                            )
-
-                        # 3. Copy to Clipboard
-                        with st.expander("📋 Click to Copy to Clipboard"):
-                            st.code(export_text, language="text")
-
-                    # --- VISUAL DISPLAY ---
-                    # (Metrics and Expanders as before)
-                    st.metric("Total Tracks", len(tracks))
-                    
-                    if exact:
-                        st.subheader("❌ Exact Duplicates")
-                        for tid, dupes in exact.items():
-                            with st.expander(f"🎵 {dupes[0]['name']} - {dupes[0]['artist']}"):
-                                for d in dupes:
-                                    st.write(f"• **Pos {d['position']}** | Album: {d['album']}")
-                    
-                    if not exact and not similar:
-                        st.info("🎉 No duplicates found!")
+                            st.download_button("📥 Download TXT", export_text, "duplicates.txt", "text/plain", use_container_width=True)
+                        
+                        with col_dl3:
+                            with st.popover("📋 Copy to Clipboard", use_container_width=True):
+                                st.info("Copy the text below:")
+                                st.code(export_text, language="text")
                 
         except Exception as e:
             st.exception(e)
