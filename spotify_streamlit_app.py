@@ -2,6 +2,7 @@ import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from collections import defaultdict
+import io
 
 # Page config
 st.set_page_config(page_title="Spotify Duplicate Finder", page_icon="🎵")
@@ -13,11 +14,20 @@ st.write("Find duplicate songs in your Spotify playlists")
 # --- SIDEBAR CONTROLS ---
 with st.sidebar:
     st.header("App Controls")
-    # This button clears the @st.cache_resource and re-runs the app
-    if st.button("🔄 Refresh / Clear Cache"):
+    
+    def reset_app():
+        # 1. Clear the Spotify API cache
         st.cache_resource.clear()
+        # 2. Clear the text input by resetting its session state key
+        if 'playlist_input' in st.session_state:
+            st.session_state['playlist_input'] = ""
+        # 3. Rerun the app
         st.rerun()
-    st.info("Use this if you've updated your playlist and want to see the changes here.")
+
+    if st.button("🔄 Refresh / Clear All"):
+        reset_app()
+        
+    st.info("This will clear the current results and reset the search box.")
 
 # Spotify credentials from Streamlit secrets
 try:
@@ -41,7 +51,6 @@ sp = get_spotify_client()
 def get_playlist_tracks(playlist_id):
     """Fetch all tracks from a playlist handling pagination."""
     tracks = []
-    # Using a try block here specifically for the API call
     try:
         results = sp.playlist_tracks(playlist_id)
     except Exception as e:
@@ -86,7 +95,8 @@ st.write("---")
 
 playlist_url = st.text_input(
     "Enter Spotify Playlist URL or ID:",
-    placeholder="https://open.spotify.com/playlist/..."
+    placeholder="https://open.spotify.com/playlist/...",
+    key="playlist_input"
 )
 
 if st.button("🔍 Find Duplicates", type="primary"):
@@ -94,8 +104,8 @@ if st.button("🔍 Find Duplicates", type="primary"):
         st.error("Please enter a playlist URL or ID")
     else:
         try:
-            # Robust extraction logic (Choice B)
-            if 'open.spotify.com' in playlist_url:
+            # Robust extraction logic
+            if 'spotify.com' in playlist_url:
                 playlist_id = playlist_url.split('/')[-1].split('?')[0]
             else:
                 playlist_id = playlist_url
@@ -118,6 +128,44 @@ if st.button("🔍 Find Duplicates", type="primary"):
                     with col3:
                         st.metric("Similar Tracks", len(similar))
                     
+                    # --- EXPORT LOGIC ---
+                    export_text = "SPOTIFY DUPLICATE REPORT\n" + "="*25 + "\n\n"
+                    
+                    if exact:
+                        export_text += "EXACT DUPLICATES (Same Track ID):\n"
+                        for tid, dupes in exact.items():
+                            export_text += f"- {dupes[0]['name']} by {dupes[0]['artist']}\n"
+                            for d in dupes:
+                                export_text += f"  • Position: {d['position']} | Album: {d['album']}\n"
+                        export_text += "\n"
+
+                    if similar:
+                        export_text += "SIMILAR TRACKS (Same Name & Artist):\n"
+                        for key, dupes in similar.items():
+                            export_text += f"- {dupes[0]['name']} by {dupes[0]['artist']}\n"
+                            for d in dupes:
+                                export_text += f"  • Position: {d['position']} | Album: {d['album']}\n"
+                        export_text += "\n"
+
+                    # Only show export options if duplicates exist
+                    if exact or similar:
+                        st.write("---")
+                        st.subheader("💾 Export Results")
+                        
+                        # Download Button
+                        st.download_button(
+                            label="📥 Download as Text File",
+                            data=export_text,
+                            file_name="spotify_duplicates.txt",
+                            mime="text/plain"
+                        )
+                        
+                        # Copy to Clipboard (using st.code for the built-in copy button)
+                        with st.expander("📋 Click to Copy to Clipboard"):
+                            st.info("Hover over the box below and click the copy icon in the top right.")
+                            st.code(export_text, language="text")
+
+                    # --- VISUAL DISPLAY ---
                     if exact:
                         st.write("---")
                         st.subheader("❌ Exact Duplicates (Same ID)")
