@@ -1,6 +1,6 @@
 import streamlit as st
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyClientCredentials
 from collections import defaultdict
 
 # Page config
@@ -11,38 +11,45 @@ st.title("🎵 Spotify Duplicate Finder")
 st.write("Find duplicate songs in your Spotify playlists")
 
 # Spotify credentials from Streamlit secrets
-CLIENT_ID = st.secrets["SPOTIFY_CLIENT_ID"]
-CLIENT_SECRET = st.secrets["SPOTIFY_CLIENT_SECRET"]
-# Use different redirect URI based on environment
+# Ensure these keys exist in your Streamlit Cloud "Secrets" setting
+try:
+    CLIENT_ID = st.secrets["SPOTIFY_CLIENT_ID"]
+    CLIENT_SECRET = st.secrets["SPOTIFY_CLIENT_SECRET"]
+except KeyError:
+    st.error("Missing Spotify Credentials! Please add them to your Streamlit Secrets.")
+    st.stop()
 
 # Initialize Spotify client
 @st.cache_resource
 def get_spotify_client():
-    return spotipy.Spotify(auth_manager=SpotifyOAuth(
+    """
+    Using SpotifyClientCredentials for read-only access to public playlists.
+    This does not require a redirect URI or user login.
+    """
+    auth_manager = SpotifyClientCredentials(
         client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-        redirect_uri=REDIRECT_URI,
-        scope='playlist-read-private playlist-read-collaborative'
-    ))
+        client_secret=CLIENT_SECRET
+    )
+    return spotipy.Spotify(auth_manager=auth_manager)
 
 sp = get_spotify_client()
 
-# Functions from your original script
 def get_playlist_tracks(playlist_id):
-    """Fetch all tracks from a playlist."""
+    """Fetch all tracks from a playlist handling pagination."""
     tracks = []
     results = sp.playlist_tracks(playlist_id)
     
     while results:
         for item in results['items']:
-            if item['track']:
+            # Ensure the track exists (sometimes tracks are deleted/unavailable)
+            if item.get('track'):
                 track = item['track']
                 tracks.append({
-                    'id': track['id'],
-                    'name': track['name'],
-                    'artist': track['artists'][0]['name'],
-                    'album': track['album']['name'],
-                    'added_at': item['added_at']
+                    'id': track.get('id'),
+                    'name': track.get('name', 'Unknown Title'),
+                    'artist': track['artists'][0]['name'] if track.get('artists') else 'Unknown Artist',
+                    'album': track['album']['name'] if track.get('album') else 'Unknown Album',
+                    'added_at': item.get('added_at')
                 })
         
         results = sp.next(results) if results['next'] else None
@@ -55,7 +62,9 @@ def find_duplicates(tracks):
     by_name_artist = defaultdict(list)
     
     for i, track in enumerate(tracks):
-        by_id[track['id']].append({**track, 'position': i + 1})
+        # Only track by ID if an ID exists
+        if track['id']:
+            by_id[track['id']].append({**track, 'position': i + 1})
         
         key = f"{track['name'].lower()}::{track['artist'].lower()}"
         by_name_artist[key].append({**track, 'position': i + 1})
@@ -80,8 +89,10 @@ if st.button("🔍 Find Duplicates", type="primary"):
         st.error("Please enter a playlist URL or ID")
     else:
         try:
-            # Extract playlist ID
-            if 'spotify.com/playlist/' in playlist_url:
+            # Enhanced Playlist ID Extraction
+            # Handles: open.spotify.com/playlist/ID or just the ID itself
+            if 'spotify.com' in playlist_url:
+                # Splits the URL and grabs the ID before any query parameters (?)
                 playlist_id = playlist_url.split('/')[-1].split('?')[0]
             else:
                 playlist_id = playlist_url
@@ -106,7 +117,7 @@ if st.button("🔍 Find Duplicates", type="primary"):
             # Exact duplicates section
             if exact:
                 st.write("---")
-                st.subheader("❌ Exact Duplicates")
+                st.subheader("❌ Exact Duplicates (Same ID)")
                 for track_id, dupes in exact.items():
                     first = dupes[0]
                     with st.expander(f"🎵 {first['name']} - {first['artist']}"):
@@ -116,22 +127,25 @@ if st.button("🔍 Find Duplicates", type="primary"):
             # Similar tracks section
             if similar:
                 st.write("---")
-                st.subheader("⚠️ Similar Tracks (Same name & artist, different albums)")
+                st.subheader("⚠️ Similar Tracks (Same Name & Artist)")
                 for key, dupes in similar.items():
-                    first = dupes[0]
-                    with st.expander(f"🎵 {first['name']} - {first['artist']}"):
-                        for d in dupes:
-                            st.write(f"• **Position {d['position']}** | Album: {d['album']}")
+                    # Only show if not already caught by "Exact" match
+                    if len(dupes) > 1:
+                        first = dupes[0]
+                        with st.expander(f"🎵 {first['name']} - {first['artist']}"):
+                            for d in dupes:
+                                st.write(f"• **Position {d['position']}** | Album: {d['album']}")
             
             # No duplicates message
             if not exact and not similar:
                 st.info("🎉 No duplicates found! Your playlist is clean.")
                 
         except Exception as e:
-            st.error(f"Error: {str(e)}")
-            st.write("Make sure the playlist URL is correct and you have access to it.")
+            # Using st.exception provides the traceback which is crucial 
+            # for identifying why you are getting "Address already in use"
+            st.error("An error occurred during analysis.")
+            st.exception(e) 
 
 # Footer
 st.write("---")
-
 st.caption("Built with Streamlit & Spotipy")
