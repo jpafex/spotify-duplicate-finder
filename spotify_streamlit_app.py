@@ -14,11 +14,6 @@ st.write("Find duplicate songs in your Spotify playlists")
 CLIENT_ID = st.secrets["SPOTIFY_CLIENT_ID"]
 CLIENT_SECRET = st.secrets["SPOTIFY_CLIENT_SECRET"]
 # Use different redirect URI based on environment
-import os
-if os.getenv('STREAMLIT_RUNTIME_ENVIRONMENT') == 'cloud':
-    REDIRECT_URI = 'https://spotify-duplicate-finder-jpafex.streamlit.app/'
-else:
-    REDIRECT_URI = 'http://127.0.0.1:8888/callback'
 
 # Initialize Spotify client
 @st.cache_resource
@@ -140,3 +135,4 @@ if st.button("🔍 Find Duplicates", type="primary"):
 st.write("---")
 
 st.caption("Built with Streamlit & Spotipy")
+
