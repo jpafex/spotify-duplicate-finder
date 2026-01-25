@@ -156,67 +156,71 @@ if check_password():
         # ... [Keep your existing Step 1 & Step 2 logic here] ...
         st.write("Batch Logic Active.")
 
-# --- 7. UPDATED TOOL: LIBRARY AUDITOR ---
+# --- 7. MST-SYNCHRONIZED LIBRARY AUDITOR ---
     elif choice == "💿 Library Auditor":
         st.title("💿 Library Auditor")
-        st.info("Compare Spotify Inventory against your Local Library. Tracks missing songs by their Original Position.")
+        st.info("Compare Spotify Inventory against your Local Library. Times are synced to Mountain Standard Time.")
         
         c1, c2 = st.columns(2)
         with c1:
-            inv_file = st.file_uploader("Upload Spotify Inventory (from Lister)", type="xlsx", key="aud_inv")
+            inv_file = st.file_uploader("Upload Spotify Inventory", type="xlsx", key="aud_inv")
         with c2:
-            loc_file = st.file_uploader("Upload Local Songs (from Mp3Tag)", type="xlsx", key="aud_loc")
+            loc_file = st.file_uploader("Upload Local Songs", type="xlsx", key="aud_loc")
             
         if inv_file and loc_file:
             if st.button("🔍 Run Audit"):
                 with st.spinner("Analyzing song collections..."):
+                    # 1. Establish MST Time (UTC - 7 hours)
+                    from datetime import datetime, timedelta
+                    mst_now = datetime.utcnow() - timedelta(hours=7)
+                    run_time_str = mst_now.strftime("%Y-%m-%d %H:%M:%S")
+                    file_stamp = mst_now.strftime("%Y%m%d_%H%M%S")
+
                     inv_df = pd.read_excel(inv_file)
                     loc_df = pd.read_excel(loc_file)
                     
-                    # 1. Create comparison keys
+                    # 2. Key Creation & Comparison
                     inv_df['compare_key'] = inv_df.apply(lambda r: 
                         f"{advanced_normalize(r['Name'])}__{advanced_normalize(r['Artist'])}__{advanced_normalize(r['Album'])}", axis=1)
                     
                     local_keys = set()
                     for entry in loc_df.iloc[:, 0]:
-                        parts = str(entry).split(',') # Mp3Tag format
+                        parts = str(entry).split(',') 
                         if len(parts) >= 3:
                             k = f"{advanced_normalize(parts[0])}__{advanced_normalize(parts[1])}__{advanced_normalize(parts[2])}"
                             local_keys.add(k)
                     
-                    # 2. Identify missing songs
                     missing_df = inv_df[~inv_df['compare_key'].isin(local_keys)].copy()
                     
-                    # 3. Success Feedback
+                    # 3. Success Feedback & MST Metrics
                     st.write("---")
                     st.balloons()
                     
-                    # 4. Success Report Metrics
-                    run_time = time.strftime("%Y-%m-%d %H:%M:%S")
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Local Library Size", len(local_keys))
                     m2.metric("Missing Songs", len(missing_df))
-                    m3.metric("Last Run", time.strftime("%H:%M:%S"))
+                    m3.metric("MST Run Time", mst_now.strftime("%H:%M:%S"))
                     
                     if not missing_df.empty:
-                        st.subheader(f"🛒 Missing Songs Purchase List (Run: {run_time})")
+                        st.subheader(f"🛒 Missing Songs Purchase List (Run: {run_time_str} MST)")
                         
-                        # Displaying Original Pos first for the team
                         display_cols = ['Original Pos', 'Name', 'Artist', 'Album']
-                        
-                        # Check if 'Original Pos' exists in the uploaded file
                         if 'Original Pos' not in missing_df.columns:
-                            st.error("Wait! 'Original Pos' not found in your Inventory file. Please use an export from the 'Song Lister'.")
+                            st.error("Missing 'Original Pos' column in Inventory file.")
                         
                         st.dataframe(missing_df[display_cols], use_container_width=True, hide_index=True)
                         
-                        # Create CSV for download with Timestamp
                         report_csv = missing_df[display_cols].to_csv(index=False).encode('utf-8')
                         st.download_button(
-                            label=f"📥 Download Audit Report ({run_time})", 
+                            label=f"📥 Download Audit Report ({run_time_str})", 
                             data=report_csv, 
-                            file_name=f"Library_Audit_{time.strftime('%Y%m%d_%H%M%S')}.csv", 
+                            file_name=f"Library_Audit_{file_stamp}_MST.csv", 
+                            mime="text/csv"
+                        )
+                    else:
+                        st.success(f"🎉 100% Match! (Verified at {run_time_str} MST)")
                             mime="text/csv"
                         )
                     else:
                         st.success(f"🎉 All Spotify songs matched your local library! (Verified at {run_time})")
+
