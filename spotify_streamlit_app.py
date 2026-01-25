@@ -224,3 +224,11 @@ if check_password():
                     else:
                         st.success(f"🎉 All Spotify songs matched your local library! (Verified at {run_time})")
 
+# Create CSV for download with Timestamp
+                        report_csv = missing_df[display_cols].to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label=f"📥 Download Audit Report ({run_time_str})", 
+                            data=report_csv, 
+                            file_name=f"Library_Audit_{file_stamp}_MST.csv", 
+                            mime="text/csv"
+                        )
