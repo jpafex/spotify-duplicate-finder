@@ -4,6 +4,8 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 from collections import defaultdict
 import pandas as pd
 from math import ceil
+import io
+import zipfile  # New library for bundling files
 
 # Page config
 st.set_page_config(page_title="AfexCloud Dashboard", page_icon="☁️", layout="wide")
@@ -47,9 +49,8 @@ if check_password():
 
     sp_read = get_read_client()
 
-    # --- 3. UPDATED HELPER FUNCTIONS (Preserving Global Position) ---
+    # --- 3. HELPER FUNCTIONS ---
     def get_all_tracks_with_pos(playlist_id):
-        """Fetches tracks and assigns their original global position number."""
         tracks = []
         try:
             results = sp_read.playlist_tracks(playlist_id)
@@ -59,8 +60,8 @@ if check_password():
                     if item.get('track'):
                         t = item['track']
                         tracks.append({
-                            'Original Pos': current_pos, # Fixed Global Counter
-                            'Spotify - id': t.get('id'),
+                            'Original Pos': current_pos, 
+                            'Spotify - id': t.get('id'), # Required for Step 2 Upload [cite: 3]
                             'Name': t.get('name', 'Unknown'),
                             'Artist': t['artists'][0]['name'] if t.get('artists') else 'Unknown',
                             'Album': t['album']['name'] if t.get('album') else 'Unknown'
@@ -82,41 +83,55 @@ if check_password():
             st.session_state["password_correct"] = False
             st.rerun()
 
-    # --- 5. DASHBOARD PAGES ---
-
-    if choice == "🏠 Home":
-        st.title("🚀 AfexCloud Marketing Dashboard")
-        st.info("Now tracking Global Positions in all batches.")
-
-    elif choice == "📦 Batch Manager":
+    # --- 5. BATCH MANAGER PAGE (Updated with ZIP) ---
+    if choice == "📦 Batch Manager":
         st.title("📦 Batch Management Tool")
         tab1, tab2 = st.tabs(["Step 1: Create CSV Batches", "Step 2: Upload to Spotify"])
 
         with tab1:
             st.subheader("1. Split Playlist into Batches of 25")
             url = st.text_input("Source Playlist URL/ID:", key="batch_source")
+            
             if st.button("Generate Batches"):
                 p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
                 all_tracks = get_all_tracks_with_pos(p_id)
-                num_batches = ceil(len(all_tracks) / 25)
                 
-                for i in range(num_batches):
-                    batch = all_tracks[i*25 : (i+1)*25]
-                    df_batch = pd.DataFrame(batch)
+                if all_tracks:
+                    num_batches = ceil(len(all_tracks) / 25)
+                    st.success(f"Successfully processed {len(all_tracks)} tracks into {num_batches} batches.")
                     
-                    # Ensure columns are in the correct order for the team
-                    df_batch = df_batch[['Original Pos', 'Name', 'Artist', 'Album', 'Spotify - id']]
+                    # Create a memory buffer for the ZIP file
+                    zip_buffer = io.BytesIO()
                     
-                    range_label = f"{batch[0]['Original Pos']} to {batch[-1]['Original Pos']}"
-                    with st.expander(f"Batch {i+1} (Tracks {range_label})"):
-                        st.dataframe(df_batch, use_container_width=True, hide_index=True)
-                        csv = df_batch.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label=f"📥 Download Batch {i+1} CSV",
-                            data=csv,
-                            file_name=f"Batch_{i+1}_Tracks_{range_label}.csv",
-                            mime="text/csv"
-                        )
+                    # Open the ZIP archive for writing
+                    with zipfile.ZipFile(zip_buffer, "w") as zf:
+                        for i in range(num_batches):
+                            batch = all_tracks[i*25 : (i+1)*25]
+                            df_batch = pd.DataFrame(batch)
+                            df_batch = df_batch[['Original Pos', 'Name', 'Artist', 'Album', 'Spotify - id']]
+                            
+                            range_label = f"{batch[0]['Original Pos']}_to_{batch[-1]['Original Pos']}"
+                            csv_name = f"Batch_{i+1}_Tracks_{range_label}.csv"
+                            
+                            # Add CSV to the ZIP archive
+                            csv_content = df_batch.to_csv(index=False).encode('utf-8')
+                            zf.writestr(csv_name, csv_content)
+                            
+                            # Still show the individual expanders for review
+                            with st.expander(f"View Batch {i+1} (Tracks {range_label})"):
+                                st.dataframe(df_batch, use_container_width=True, hide_index=True)
+                                st.download_button(f"📥 Download {csv_name}", csv_content, csv_name, "text/csv")
+
+                    # --- THE "GOLD" BUTTON: Download All as ZIP ---
+                    st.write("---")
+                    st.subheader("🏁 All Batches Ready")
+                    st.download_button(
+                        label="📦 DOWNLOAD ALL BATCHES (ZIP)",
+                        data=zip_buffer.getvalue(),
+                        file_name="all_playlist_batches.zip",
+                        mime="application/zip",
+                        type="primary"
+                    )
 
         with tab2:
             st.subheader("2. Upload Batches to Create New Playlists")
@@ -128,14 +143,13 @@ if check_password():
                     for f in uploaded_files:
                         df = pd.read_csv(f)
                         if 'Spotify - id' in df.columns:
-                            # Using the file name as the playlist name for clarity
                             p = sp_write.user_playlist_create(user=user_id, name=f"Batch: {f.name}", public=False)
-                            uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()]
+                            uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()] # [cite: 3]
                             sp_write.playlist_add_items(p['id'], uris)
                             st.success(f"Playlist Created: {f.name}")
                 except Exception as e:
                     st.error(f"Auth Error: {e}")
 
-    # [Note: Duplicate Finder and Song Lister sections remain in the full script as previously built]
+    # [Home, Duplicate Finder, and Song Lister sections remain in the full script]
     st.write("---")
-    st.caption("AfexCloud Suite | Global Position Tracking Enabled")
+    st.caption("AfexCloud Suite | ZIP Export & Global Pos Enabled")
