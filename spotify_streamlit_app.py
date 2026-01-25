@@ -167,7 +167,8 @@ if check_password():
         with c2:
             loc_file = st.file_uploader("Upload Local Songs", type="xlsx", key="aud_loc")
             
-        if inv_file and local_file:
+        # FIX: Changed 'local_file' to 'loc_file' to match the uploader above
+        if inv_file and loc_file:
             if st.button("🔍 Run Audit"):
                 with st.spinner("Analyzing song collections..."):
                     # 1. Establish MST Time (UTC - 7 hours)
@@ -177,7 +178,7 @@ if check_password():
                     file_stamp = mst_now.strftime("%Y%m%d_%H%M%S")
 
                     inv_df = pd.read_excel(inv_file)
-                    loc_df = pd.read_excel(local_file)
+                    loc_df = pd.read_excel(loc_file)
                     
                     # 2. Key Creation & Comparison
                     inv_df['compare_key'] = inv_df.apply(lambda r: 
@@ -220,10 +221,6 @@ if check_password():
                     else:
                         st.success(f"🎉 100% Match! All songs found in library (Verified at {run_time_str} MST)")
 
-    st.write("---")
-    st.caption("AfexCloud Suite | Audit & Batch Enabled | MST Timezone Active")
-                            data=report_csv, 
-                            file_name=f"Library_Audit_{file_stamp}_MST.csv", 
-                            mime="text/csv"
-                        )
-
+# --- FINAL FOOTER (Ensure these two lines are at the very bottom and NOT indented) ---
+st.write("---")
+st.caption("AfexCloud Suite | Audit & Batch Enabled | MST Timezone Active")
