@@ -29,13 +29,6 @@ def check_password():
 if check_password():
     
     # --- 2. AUTHENTICATION ENGINES ---
-    @st.cache_resource
-    def get_read_client():
-        return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-            client_id=st.secrets["SPOTIFY_CLIENT_ID"],
-            client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"]
-        ))
-
     def get_auth_manager():
         scope = "playlist-modify-public playlist-modify-private"
         return SpotifyOAuth(
@@ -47,20 +40,23 @@ if check_password():
             cache_path=".cache-token"
         )
 
-    sp_read = get_read_client()
     auth_manager = get_auth_manager()
 
-    # --- 3. AUTO-CAPTURE LOGIC (The "Gold" Touch) ---
-    # This checks the URL for that ?code= immediately after you log in
-    if "code" in st.query_params and not auth_manager.validate_token(auth_manager.cache_handler.get_cached_token()):
+    # --- 3. AUTO-CAPTURE HANDSHAKE ---
+    # This tries to catch the code from the URL and "exchange" it for a token
+    if "code" in st.query_params:
         try:
             code = st.query_params.get("code")
             auth_manager.get_access_token(code, as_dict=False)
-            st.success("✅ Spotify Connection Verified Automatically!")
+            # Clear the URL parameters so we don't try to use the code again
+            st.query_params.clear()
+            st.success("✅ Spotify Connection Verified!")
         except Exception as e:
-            st.error(f"Auto-auth failed: {e}")
+            # If the code is expired/invalid, we just clear it and let the user try again
+            st.query_params.clear()
+            st.warning("Previous connection attempt expired. Please try authorizing again.")
 
-    # --- 4. SIDEBAR NAVIGATION ---
+    # --- 4. SIDEBAR ---
     with st.sidebar:
         st.title("☁️ AfexCloud")
         choice = st.radio("Select a Tool:", ["🏠 Home", "🔍 Duplicate Finder", "📋 Song Lister", "📦 Batch Manager"])
@@ -75,27 +71,29 @@ if check_password():
 
         with tab1:
             st.subheader("1. Split Playlist into Batches")
-            st.write("Step 1 Logic Ready.") # Your existing code here
+            # [Existing Batch/ZIP logic stays here]
+            st.write("Step 1 Ready.")
 
         with tab2:
             st.subheader("2. Upload Batches to Spotify")
             
-            # --- AUTH CHECKBOX ---
             token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
             
             if not token_info:
                 auth_url = auth_manager.get_authorize_url()
-                st.warning("🔑 One-Time Spotify Authorization Required")
+                st.warning("🔑 Spotify Authorization Required")
                 st.markdown(f"[**Click Here to Authorize AfexCloud on Spotify**]({auth_url})")
                 
-                # The box is now permanently visible here if you aren't authorized
-                manual_url = st.text_input("Paste the URL from your address bar here if it didn't auto-connect:")
+                manual_url = st.text_input("If it didn't auto-connect, paste the NEW URL from your browser here:")
                 if st.button("Complete Connection"):
                     if manual_url:
-                        code = auth_manager.parse_response_code(manual_url)
-                        auth_manager.get_access_token(code, as_dict=False)
-                        st.success("✅ Connected! You can now upload.")
-                        st.rerun()
+                        try:
+                            code = auth_manager.parse_response_code(manual_url)
+                            auth_manager.get_access_token(code, as_dict=False)
+                            st.success("✅ Connected!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Handshake failed: {e}. Try clicking the link above again for a fresh code.")
             else:
                 st.success("✅ Spotify Connected")
                 uploaded_files = st.file_uploader("Upload Batch CSVs", accept_multiple_files=True, type="csv")
@@ -115,4 +113,4 @@ if check_password():
                         st.error("Please upload files first.")
 
     st.write("---")
-    st.caption("AfexCloud Suite | Auto-Auth & URL Capture Enabled")
+    st.caption("AfexCloud Suite | Handshake Recovery Enabled")
