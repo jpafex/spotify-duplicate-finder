@@ -95,10 +95,51 @@ if check_password():
             st.rerun()
 
     # --- 6. DASHBOARD PAGES ---
+    
+    # PAGE: HOME
     if choice == "🏠 Home":
         st.title("🚀 AfexCloud Marketing Dashboard")
-        st.info("The multi-tool suite is fully operational and tracking global positions.")
+        st.info("The multi-tool suite is fully operational. Select a tool from the sidebar to begin.")
+        st.write("Current focus: **High-volume playlist inventory and batch management.**")
 
+    # PAGE: DUPLICATE FINDER
+    elif choice == "🔍 Duplicate Finder":
+        st.title("🔍 Spotify Duplicate Finder")
+        url = st.text_input("Enter Playlist URL/ID:", key="dup_input")
+        if st.button("Run Duplicate Scan"):
+            p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
+            with st.spinner("Scanning for duplicates..."):
+                tracks = get_all_tracks_with_pos(p_id)
+                if tracks:
+                    by_id = defaultdict(list)
+                    for t in tracks:
+                        by_id[t['Spotify - id']].append(t)
+                    
+                    dupes = [item for group in by_id.values() if len(group) > 1 for item in group]
+                    
+                    if not dupes:
+                        st.balloons()
+                        st.success("🎉 No duplicates found!")
+                    else:
+                        st.warning(f"Found {len(dupes)} duplicate entries.")
+                        df_dupes = pd.DataFrame(dupes)
+                        st.dataframe(df_dupes[['Original Pos', 'Name', 'Artist', 'Album', 'Spotify - id']], use_container_width=True, hide_index=True)
+
+    # PAGE: SONG LISTER
+    elif choice == "📋 Song Lister":
+        st.title("📋 Playlist Inventory Lister")
+        url = st.text_input("Enter Playlist URL/ID:", key="list_input")
+        if st.button("Generate Inventory List"):
+            p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
+            with st.spinner("Fetching track list..."):
+                tracks = get_all_tracks_with_pos(p_id)
+                if tracks:
+                    df_list = pd.DataFrame(tracks)
+                    st.metric("Total Songs", len(tracks))
+                    st.dataframe(df_list, use_container_width=True, hide_index=True)
+                    st.download_button("📥 Download Inventory (CSV)", df_list.to_csv(index=False).encode('utf-8'), "inventory.csv", "text/csv")
+
+    # PAGE: BATCH MANAGER
     elif choice == "📦 Batch Manager":
         st.title("📦 Batch Management Tool")
         tab1, tab2 = st.tabs(["Step 1: Create CSV Batches", "Step 2: Upload to Spotify"])
@@ -122,11 +163,13 @@ if check_password():
                             with st.expander(f"View Batch {i+1} (Tracks {range_label})"):
                                 st.dataframe(df_batch, use_container_width=True, hide_index=True)
 
+                    st.write("---")
                     st.download_button("📦 DOWNLOAD ALL BATCHES (ZIP)", zip_buffer.getvalue(), "all_batches.zip", "application/zip", type="primary")
 
         with tab2:
             st.subheader("2. Upload Batches to Spotify")
             token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
+            
             if not token_info:
                 st.warning("🔑 Authorization Required")
                 st.markdown(f"[Click Here to Authorize Spotify]({auth_manager.get_authorize_url()})")
@@ -137,6 +180,7 @@ if check_password():
             else:
                 st.success("✅ Spotify Connected")
                 uploaded_files = st.file_uploader("Upload Batch CSVs", accept_multiple_files=True, type="csv")
+                
                 if st.button("🚀 Create Spotify Playlists", type="primary"):
                     if uploaded_files:
                         sp_write = spotipy.Spotify(auth_manager=auth_manager)
@@ -146,14 +190,30 @@ if check_password():
                         
                         with st.status("Uploading...") as status:
                             for f in uploaded_files:
-                                df = pd.read_csv(f)
-                                if 'Spotify - id' in df.columns:
-                                    p = sp_write.user_playlist_create(user=user_id, name=f"Batch: {f.name}", public=False)
-                                    uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()]
-                                    sp_write.playlist_add_items(p['id'], uris)
-                                    report_data.append({"File": f.name, "Songs": len(df), "Status": "✅ Success"})
-                            status.update(label="Complete!", state="complete")
+                                try:
+                                    df = pd.read_csv(f)
+                                    if 'Spotify - id' in df.columns:
+                                        p_name = f"Batch: {f.name}"
+                                        p = sp_write.user_playlist_create(user=user_id, name=p_name, public=False)
+                                        uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()]
+                                        sp_write.playlist_add_items(p['id'], uris)
+                                        report_data.append({"File": f.name, "Songs": len(df), "Status": "✅ Success"})
+                                except Exception as e:
+                                    report_data.append({"File": f.name, "Songs": 0, "Status": f"❌ Error: {e}"})
+                            status.update(label="Upload Complete!", state="complete")
 
+                        # --- THE SUCCESS REPORT (The Finished Cherry) ---
                         st.balloons()
-                        st.header("📊 Success Report")
-                        c1, c2, c3 =
+                        st.header("📊 Batch Upload Success Report")
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Playlists Created", len(report_data))
+                        c2.metric("Total Tracks Uploaded", sum(d['Songs'] for d in report_data))
+                        c3.metric("Processing Time", f"{round(time.time() - start_t, 2)}s")
+                        
+                        st.write("### 📜 Execution Log")
+                        st.table(pd.DataFrame(report_data))
+                    else:
+                        st.error("Please upload CSV files first.")
+
+    st.write("---")
+    st.caption("AfexCloud Suite | Global Position Tracking & Success Reporting Enabled")
