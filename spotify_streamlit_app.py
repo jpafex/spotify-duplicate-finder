@@ -4,96 +4,9 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 import pandas as pd
 from math import ceil
 import io
-import zipfileimport streamlit as st
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
-import pandas as pd
-from math import ceil
-import io
 import zipfile
-import time # Added for the 'report' timing effect
-
-# Page config
-st.set_page_config(page_title="AfexCloud Dashboard", page_icon="☁️", layout="wide")
-
-# --- [LOGIN & AUTH SECTIONS REMAIN THE SAME - KEPT SECURE FOR JPAFEX] ---
-# ... (All your working Login/Auth code stays exactly as is) ...
-
-if "password_correct" in st.session_state and st.session_state["password_correct"]:
-    # (Assuming existing logic for sp_read and auth_manager is here)
-
-    # --- 5. BATCH MANAGER (Updated with Success Report) ---
-    if st.session_state.get('choice') == "📦 Batch Manager":
-        st.title("📦 Batch Management Tool")
-        tab1, tab2 = st.tabs(["Step 1: Create CSV Batches", "Step 2: Upload to Spotify"])
-
-        with tab1:
-            st.subheader("1. Split Playlist into Batches")
-            # [Step 1 Logic Stays Here]
-
-        with tab2:
-            st.subheader("2. Upload Batches to Spotify")
-            
-            # (Assuming existing token check logic is here)
-            token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
-            
-            if token_info:
-                st.success("✅ Spotify Connected")
-                uploaded_files = st.file_uploader("Upload Batch CSVs", accept_multiple_files=True, type="csv")
-                
-                if st.button("🚀 Create Spotify Playlists", type="primary"):
-                    if uploaded_files:
-                        sp_write = spotipy.Spotify(auth_manager=auth_manager)
-                        user_id = sp_write.current_user()['id']
-                        
-                        # --- SUCCESS REPORT DATA ---
-                        total_songs_processed = 0
-                        playlists_created = []
-                        start_time = time.time()
-
-                        with st.status("Processing Batches...", expanded=True) as status:
-                            for f in uploaded_files:
-                                try:
-                                    df = pd.read_csv(f)
-                                    if 'Spotify - id' in df.columns:
-                                        song_count = len(df)
-                                        p_name = f"Batch: {f.name}"
-                                        p = sp_write.user_playlist_create(user=user_id, name=p_name, public=False)
-                                        uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()]
-                                        sp_write.playlist_add_items(p['id'], uris)
-                                        
-                                        # Track data for report
-                                        total_songs_processed += song_count
-                                        playlists_created.append({"File": f.name, "Songs": song_count, "Status": "✅ Success"})
-                                        st.write(f"Created: {p_name} ({song_count} tracks)")
-                                except Exception as e:
-                                    playlists_created.append({"File": f.name, "Songs": 0, "Status": f"❌ Error: {e}"})
-                            
-                            status.update(label="Upload Complete!", state="complete", expanded=False)
-
-                        # --- THE SUCCESS REPORT (The Cherry on Top) ---
-                        st.write("---")
-                        st.balloons()
-                        st.header("📊 Batch Upload Success Report")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Total Playlists Created", len(playlists_created))
-                        col2.metric("Total Tracks Uploaded", total_songs_processed)
-                        col3.metric("Processing Time", f"{round(time.time() - start_time, 2)}s")
-
-                        st.write("### 📜 Detailed Log")
-                        report_df = pd.DataFrame(playlists_created)
-                        st.table(report_df) # Using table for a clean, non-interactive print view
-                        
-                        # Manager Export Option
-                        st.download_button(
-                            "📥 Download Success Report (CSV)", 
-                            report_df.to_csv(index=False).encode('utf-8'), 
-                            "batch_upload_report.csv", 
-                            "text/csv"
-                        )
-                    else:
-                        st.error("Please upload files first.")
+import time
+from collections import defaultdict
 
 # Page config
 st.set_page_config(page_title="AfexCloud Dashboard", page_icon="☁️", layout="wide")
@@ -118,6 +31,13 @@ def check_password():
 if check_password():
     
     # --- 2. AUTHENTICATION ENGINES ---
+    @st.cache_resource
+    def get_read_client():
+        return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+            client_id=st.secrets["SPOTIFY_CLIENT_ID"],
+            client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"]
+        ))
+
     def get_auth_manager():
         scope = "playlist-modify-public playlist-modify-private"
         return SpotifyOAuth(
@@ -129,23 +49,44 @@ if check_password():
             cache_path=".cache-token"
         )
 
+    sp_read = get_read_client()
     auth_manager = get_auth_manager()
 
     # --- 3. AUTO-CAPTURE HANDSHAKE ---
-    # This tries to catch the code from the URL and "exchange" it for a token
     if "code" in st.query_params:
         try:
             code = st.query_params.get("code")
             auth_manager.get_access_token(code, as_dict=False)
-            # Clear the URL parameters so we don't try to use the code again
             st.query_params.clear()
             st.success("✅ Spotify Connection Verified!")
-        except Exception as e:
-            # If the code is expired/invalid, we just clear it and let the user try again
+        except Exception:
             st.query_params.clear()
-            st.warning("Previous connection attempt expired. Please try authorizing again.")
 
-    # --- 4. SIDEBAR ---
+    # --- 4. HELPER FUNCTIONS ---
+    def get_all_tracks_with_pos(playlist_id):
+        tracks = []
+        try:
+            results = sp_read.playlist_tracks(playlist_id)
+            current_pos = 1
+            while results:
+                for item in results['items']:
+                    if item.get('track'):
+                        t = item['track']
+                        tracks.append({
+                            'Original Pos': current_pos, 
+                            'Spotify - id': t.get('id'),
+                            'Name': t.get('name', 'Unknown'),
+                            'Artist': t['artists'][0]['name'] if t.get('artists') else 'Unknown',
+                            'Album': t['album']['name'] if t.get('album') else 'Unknown'
+                        })
+                        current_pos += 1
+                results = sp_read.next(results) if results['next'] else None
+        except Exception as e:
+            st.error(f"Spotify API Error: {e}")
+            return []
+        return tracks
+
+    # --- 5. SIDEBAR NAVIGATION ---
     with st.sidebar:
         st.title("☁️ AfexCloud")
         choice = st.radio("Select a Tool:", ["🏠 Home", "🔍 Duplicate Finder", "📋 Song Lister", "📦 Batch Manager"])
@@ -153,54 +94,66 @@ if check_password():
             st.session_state["password_correct"] = False
             st.rerun()
 
-    # --- 5. BATCH MANAGER ---
-    if choice == "📦 Batch Manager":
+    # --- 6. DASHBOARD PAGES ---
+    if choice == "🏠 Home":
+        st.title("🚀 AfexCloud Marketing Dashboard")
+        st.info("The multi-tool suite is fully operational and tracking global positions.")
+
+    elif choice == "📦 Batch Manager":
         st.title("📦 Batch Management Tool")
         tab1, tab2 = st.tabs(["Step 1: Create CSV Batches", "Step 2: Upload to Spotify"])
 
         with tab1:
-            st.subheader("1. Split Playlist into Batches")
-            # [Existing Batch/ZIP logic stays here]
-            st.write("Step 1 Ready.")
+            st.subheader("1. Split Playlist into Batches of 25")
+            url = st.text_input("Source Playlist URL/ID:", key="batch_source")
+            if st.button("Generate Batches"):
+                p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
+                all_tracks = get_all_tracks_with_pos(p_id)
+                if all_tracks:
+                    num_batches = ceil(len(all_tracks) / 25)
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w") as zf:
+                        for i in range(num_batches):
+                            batch = all_tracks[i*25 : (i+1)*25]
+                            df_batch = pd.DataFrame(batch)[['Original Pos', 'Name', 'Artist', 'Album', 'Spotify - id']]
+                            range_label = f"{batch[0]['Original Pos']}_to_{batch[-1]['Original Pos']}"
+                            csv_name = f"Batch_{i+1}_Tracks_{range_label}.csv"
+                            zf.writestr(csv_name, df_batch.to_csv(index=False).encode('utf-8'))
+                            with st.expander(f"View Batch {i+1} (Tracks {range_label})"):
+                                st.dataframe(df_batch, use_container_width=True, hide_index=True)
+
+                    st.download_button("📦 DOWNLOAD ALL BATCHES (ZIP)", zip_buffer.getvalue(), "all_batches.zip", "application/zip", type="primary")
 
         with tab2:
             st.subheader("2. Upload Batches to Spotify")
-            
             token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
-            
             if not token_info:
-                auth_url = auth_manager.get_authorize_url()
-                st.warning("🔑 Spotify Authorization Required")
-                st.markdown(f"[**Click Here to Authorize AfexCloud on Spotify**]({auth_url})")
-                
-                manual_url = st.text_input("If it didn't auto-connect, paste the NEW URL from your browser here:")
+                st.warning("🔑 Authorization Required")
+                st.markdown(f"[Click Here to Authorize Spotify]({auth_manager.get_authorize_url()})")
+                manual_url = st.text_input("Paste Redirect URL here if needed:")
                 if st.button("Complete Connection"):
-                    if manual_url:
-                        try:
-                            code = auth_manager.parse_response_code(manual_url)
-                            auth_manager.get_access_token(code, as_dict=False)
-                            st.success("✅ Connected!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Handshake failed: {e}. Try clicking the link above again for a fresh code.")
+                    auth_manager.get_access_token(auth_manager.parse_response_code(manual_url), as_dict=False)
+                    st.rerun()
             else:
                 st.success("✅ Spotify Connected")
                 uploaded_files = st.file_uploader("Upload Batch CSVs", accept_multiple_files=True, type="csv")
-                
-                if st.button("🚀 Create Spotify Playlists"):
+                if st.button("🚀 Create Spotify Playlists", type="primary"):
                     if uploaded_files:
                         sp_write = spotipy.Spotify(auth_manager=auth_manager)
                         user_id = sp_write.current_user()['id']
-                        for f in uploaded_files:
-                            df = pd.read_csv(f)
-                            if 'Spotify - id' in df.columns:
-                                p = sp_write.user_playlist_create(user=user_id, name=f"Batch: {f.name}", public=False)
-                                uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()]
-                                sp_write.playlist_add_items(p['id'], uris)
-                                st.success(f"Playlist Created: {f.name}")
-                    else:
-                        st.error("Please upload files first.")
+                        report_data = []
+                        start_t = time.time()
+                        
+                        with st.status("Uploading...") as status:
+                            for f in uploaded_files:
+                                df = pd.read_csv(f)
+                                if 'Spotify - id' in df.columns:
+                                    p = sp_write.user_playlist_create(user=user_id, name=f"Batch: {f.name}", public=False)
+                                    uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()]
+                                    sp_write.playlist_add_items(p['id'], uris)
+                                    report_data.append({"File": f.name, "Songs": len(df), "Status": "✅ Success"})
+                            status.update(label="Complete!", state="complete")
 
-    st.write("---")
-    st.caption("AfexCloud Suite | Handshake Recovery Enabled")
-
+                        st.balloons()
+                        st.header("📊 Success Report")
+                        c1, c2, c3 =
