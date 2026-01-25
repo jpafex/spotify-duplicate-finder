@@ -167,7 +167,7 @@ if check_password():
         with c2:
             loc_file = st.file_uploader("Upload Local Songs", type="xlsx", key="aud_loc")
             
-        if inv_file and loc_file:
+        if inv_file and local_file:
             if st.button("🔍 Run Audit"):
                 with st.spinner("Analyzing song collections..."):
                     # 1. Establish MST Time (UTC - 7 hours)
@@ -177,7 +177,7 @@ if check_password():
                     file_stamp = mst_now.strftime("%Y%m%d_%H%M%S")
 
                     inv_df = pd.read_excel(inv_file)
-                    loc_df = pd.read_excel(loc_file)
+                    loc_df = pd.read_excel(local_file)
                     
                     # 2. Key Creation & Comparison
                     inv_df['compare_key'] = inv_df.apply(lambda r: 
@@ -207,28 +207,23 @@ if check_password():
                         display_cols = ['Original Pos', 'Name', 'Artist', 'Album']
                         if 'Original Pos' not in missing_df.columns:
                             st.error("Missing 'Original Pos' column in Inventory file.")
-                        
-                        st.dataframe(missing_df[display_cols], use_container_width=True, hide_index=True)
-                        
-                        report_csv = missing_df[display_cols].to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label=f"📥 Download Audit Report ({run_time_str})", 
-                            data=report_csv, 
-                            file_name=f"Library_Audit_{file_stamp}_MST.csv", 
-                            mime="text/csv"
-                        )
+                        else:
+                            st.dataframe(missing_df[display_cols], use_container_width=True, hide_index=True)
+                            
+                            report_csv = missing_df[display_cols].to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label=f"📥 Download Audit Report ({run_time_str})", 
+                                data=report_csv, 
+                                file_name=f"Library_Audit_{file_stamp}_MST.csv", 
+                                mime="text/csv"
+                            )
                     else:
-                        st.success(f"🎉 100% Match! (Verified at {run_time_str} MST)")
-                            mime="text/csv"
-                        )
-                    else:
-                        st.success(f"🎉 All Spotify songs matched your local library! (Verified at {run_time})")
+                        st.success(f"🎉 100% Match! All songs found in library (Verified at {run_time_str} MST)")
 
-# Create CSV for download with Timestamp
-                        report_csv = missing_df[display_cols].to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label=f"📥 Download Audit Report ({run_time_str})", 
+    st.write("---")
+    st.caption("AfexCloud Suite | Audit & Batch Enabled | MST Timezone Active")
                             data=report_csv, 
                             file_name=f"Library_Audit_{file_stamp}_MST.csv", 
                             mime="text/csv"
                         )
+
