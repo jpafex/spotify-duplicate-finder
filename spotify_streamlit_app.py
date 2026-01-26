@@ -150,16 +150,76 @@ if check_password():
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 st.download_button("📥 Download Inventory (CSV)", df.to_csv(index=False).encode('utf-8'), "inventory.csv", "text/csv")
 
+    # --- 6. BATCH MANAGER (Full Logic Restored) ---
     elif choice == "📦 Batch Manager":
         st.title("📦 Batch Management Tool")
         tab1, tab2 = st.tabs(["Step 1: Create CSV Batches", "Step 2: Upload to Spotify"])
-        # ... [Keep your existing Step 1 & Step 2 logic here] ...
-        st.write("Batch Logic Active.")
 
-# --- 7. MST-SYNCHRONIZED LIBRARY AUDITOR ---
+        with tab1:
+            st.subheader("1. Split Playlist into Batches of 25")
+            url = st.text_input("Source Playlist URL/ID:", key="batch_source_input")
+            if st.button("Generate Batches"):
+                p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
+                all_tracks = get_all_tracks_with_pos(p_id)
+                if all_tracks:
+                    num_batches = ceil(len(all_tracks) / 25)
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w") as zf:
+                        for i in range(num_batches):
+                            batch = all_tracks[i*25 : (i+1)*25]
+                            df_batch = pd.DataFrame(batch)[['Original Pos', 'Name', 'Artist', 'Album', 'Spotify - id']]
+                            range_label = f"{batch[0]['Original Pos']}_to_{batch[-1]['Original Pos']}"
+                            csv_name = f"Batch_{i+1}_Tracks_{range_label}.csv"
+                            zf.writestr(csv_name, df_batch.to_csv(index=False).encode('utf-8'))
+                            with st.expander(f"View Batch {i+1} (Tracks {range_label})"):
+                                st.dataframe(df_batch, use_container_width=True, hide_index=True)
+
+                    st.write("---")
+                    st.download_button("📦 DOWNLOAD ALL BATCHES (ZIP)", zip_buffer.getvalue(), "all_batches.zip", "application/zip", type="primary")
+
+        with tab2:
+            st.subheader("2. Upload Batches to Spotify")
+            token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
+            if not token_info:
+                st.warning("🔑 Authorization Required")
+                st.markdown(f"[Click Here to Authorize Spotify]({auth_manager.get_authorize_url()})")
+                manual_url = st.text_input("Paste Redirect URL here if needed:")
+                if st.button("Complete Connection"):
+                    auth_manager.get_access_token(auth_manager.parse_response_code(manual_url), as_dict=False)
+                    st.rerun()
+            else:
+                st.success("✅ Spotify Connected")
+                uploaded_files = st.file_uploader("Upload Batch CSVs", accept_multiple_files=True, type="csv")
+                if st.button("🚀 Create Spotify Playlists", type="primary"):
+                    if uploaded_files:
+                        sp_write = spotipy.Spotify(auth_manager=auth_manager)
+                        user_id = sp_write.current_user()['id']
+                        report_data = []
+                        start_t = time.time()
+                        with st.status("Uploading...") as status:
+                            for f in uploaded_files:
+                                try:
+                                    df = pd.read_csv(f)
+                                    if 'Spotify - id' in df.columns:
+                                        p = sp_write.user_playlist_create(user=user_id, name=f"Batch: {f.name}", public=False)
+                                        uris = [f"spotify:track:{tid}" for tid in df['Spotify - id'].tolist()]
+                                        sp_write.playlist_add_items(p['id'], uris)
+                                        report_data.append({"File": f.name, "Songs": len(df), "Status": "✅ Success"})
+                                except Exception as e:
+                                    report_data.append({"File": f.name, "Songs": 0, "Status": f"❌ Error: {e}"})
+                            status.update(label="Complete!", state="complete")
+                        st.balloons()
+                        st.header("📊 Success Report")
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Playlists", len(report_data))
+                        c2.metric("Tracks", sum(d['Songs'] for d in report_data))
+                        c3.metric("Time", f"{round(time.time()-start_t, 2)}s")
+                        st.table(pd.DataFrame(report_data))
+
+    # --- 7. MST-SYNCHRONIZED LIBRARY AUDITOR (With Search Bar) ---
     elif choice == "💿 Library Auditor":
         st.title("💿 Library Auditor")
-        st.info("Compare Spotify Inventory against your Local Library. Times are synced to Mountain Standard Time.")
+        st.info("Compare Spotify Inventory against Local MP3s. Sync: MST.")
         
         c1, c2 = st.columns(2)
         with c1:
@@ -167,20 +227,19 @@ if check_password():
         with c2:
             loc_file = st.file_uploader("Upload Local Songs", type="xlsx", key="aud_loc")
             
-        # FIX: Changed 'local_file' to 'loc_file' to match the uploader above
         if inv_file and loc_file:
-            if st.button("🔍 Run Audit"):
+            # SEARCH BAR ADDITION
+            search_query = st.text_input("🔍 Quick Search (Name, Artist, or Album):")
+            
+            if st.button("🔍 Run Full Audit"):
                 with st.spinner("Analyzing song collections..."):
-                    # 1. Establish MST Time (UTC - 7 hours)
                     from datetime import datetime, timedelta
                     mst_now = datetime.utcnow() - timedelta(hours=7)
                     run_time_str = mst_now.strftime("%Y-%m-%d %H:%M:%S")
-                    file_stamp = mst_now.strftime("%Y%m%d_%H%M%S")
 
                     inv_df = pd.read_excel(inv_file)
                     loc_df = pd.read_excel(loc_file)
                     
-                    # 2. Key Creation & Comparison
                     inv_df['compare_key'] = inv_df.apply(lambda r: 
                         f"{advanced_normalize(r['Name'])}__{advanced_normalize(r['Artist'])}__{advanced_normalize(r['Album'])}", axis=1)
                     
@@ -193,34 +252,40 @@ if check_password():
                     
                     missing_df = inv_df[~inv_df['compare_key'].isin(local_keys)].copy()
                     
-                    # 3. Success Feedback & MST Metrics
+                    # Apply Search Filter if query exists
+                    if search_query:
+                        q = search_query.lower()
+                        missing_df = missing_df[
+                            missing_df['Name'].str.lower().contains(q, na=False) | 
+                            missing_df['Artist'].str.lower().contains(q, na=False) |
+                            missing_df['Album'].str.lower().contains(q, na=False)
+                        ]
+
                     st.write("---")
                     st.balloons()
-                    
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Local Library Size", len(local_keys))
                     m2.metric("Missing Songs", len(missing_df))
                     m3.metric("MST Run Time", mst_now.strftime("%H:%M:%S"))
                     
                     if not missing_df.empty:
-                        st.subheader(f"🛒 Missing Songs Purchase List (Run: {run_time_str} MST)")
-                        
+                        st.subheader(f"🛒 Missing Songs List (Run: {run_time_str} MST)")
                         display_cols = ['Original Pos', 'Name', 'Artist', 'Album']
-                        if 'Original Pos' not in missing_df.columns:
-                            st.error("Missing 'Original Pos' column in Inventory file.")
-                        else:
-                            st.dataframe(missing_df[display_cols], use_container_width=True, hide_index=True)
-                            
-                            report_csv = missing_df[display_cols].to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label=f"📥 Download Audit Report ({run_time_str})", 
-                                data=report_csv, 
-                                file_name=f"Library_Audit_{file_stamp}_MST.csv", 
-                                mime="text/csv"
-                            )
+                        st.dataframe(missing_df[display_cols], use_container_width=True, hide_index=True)
+                        st.download_button(
+                            label=f"📥 Download Report", 
+                            data=missing_df[display_cols].to_csv(index=False).encode('utf-8'), 
+                            file_name=f"Audit_{mst_now.strftime('%H%M%S')}_MST.csv", 
+                            mime="text/csv"
+                        )
                     else:
-                        st.success(f"🎉 100% Match! All songs found in library (Verified at {run_time_str} MST)")
+                        st.success(f"🎉 100% Match! (Verified at {run_time_str} MST)")
+
+# --- FINAL FOOTER (Outside all blocks) ---
+st.write("---")
+st.caption("AfexCloud Suite | Batch & Audit Restored | MST Timezone")
 
 # --- FINAL FOOTER (Ensure these two lines are at the very bottom and NOT indented) ---
 st.write("---")
 st.caption("AfexCloud Suite | Audit & Batch Enabled | MST Timezone Active")
+
