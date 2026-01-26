@@ -130,10 +130,10 @@ if check_password():
         st.info("Identify exactly what needs to be purchased to match your Spotify inventory.")
         # [Keep your existing Auditor logic here]
 
-    # --- NEW TOOL: COLLECTION REVIEWER (THE "STACKED" VIEW) ---
+    # --- NEW TOOL: COLLECTION REVIEWER (With Lone Wolf Highlighter) ---
     elif choice == "📊 Collection Reviewer":
         st.title("📊 Collection Reviewer")
-        st.write("Visual inspection of normalizations and comparison keys.")
+        st.info("Visual inspection table. Lone rows (mismatches) are highlighted in red.")
         
         c1, c2 = st.columns(2)
         with c1:
@@ -142,8 +142,8 @@ if check_password():
             loc_f = st.file_uploader("Upload Local Songs", type="xlsx", key="rev_loc")
             
         if inv_f and loc_f:
-            if st.button("📊 Generate Review Table"):
-                with st.spinner("Processing stacked view..."):
+            if st.button("📊 Generate Highlighted Review"):
+                with st.spinner("Analyzing pairs..."):
                     # Process Inventory
                     df_inv = pd.read_excel(inv_f)
                     inv_rows = []
@@ -161,19 +161,33 @@ if check_password():
                             key = f"{advanced_normalize(name)}__{advanced_normalize(artist)}__{advanced_normalize(album)}"
                             loc_rows.append({'Source': 'Local MP3', 'Name': name, 'Artist': artist, 'Album': album, 'Key': key})
                     
-                    # Combine and Sort (The Stacked Logic)
+                    # Combine and Sort
                     master_df = pd.concat([pd.DataFrame(inv_rows), pd.DataFrame(loc_rows)])
                     master_df = master_df.sort_values(by=['Key', 'Source'])
+
+                    # --- THE HIGHLIGHTER LOGIC ---
+                    # Count how many times each Key appears
+                    key_counts = master_df['Key'].value_counts()
                     
+                    def highlight_lone_wolves(row):
+                        # If the key only appears once, it's a lone wolf
+                        if key_counts[row['Key']] == 1:
+                            return ['background-color: #ffcccc'] * len(row) # Soft red
+                        return [''] * len(row)
+
                     st.balloons()
                     st.subheader("🔍 Inspection Table")
-                    st.write("Rows are paired by their 'Key'. If you see a lone row, it's a mismatch.")
-                    st.dataframe(master_df, use_container_width=True, hide_index=True)
                     
-                    st.download_button("📥 Download Master Review (CSV)", 
+                    # Apply styling to the dataframe
+                    styled_df = master_df.style.apply(highlight_lone_wolves, axis=1)
+                    
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                    
+                    st.download_button("📥 Download Review (CSV)", 
                                      master_df.to_csv(index=False).encode('utf-8'), 
                                      "collection_review.csv", "text/csv")
 
 # --- FINAL FOOTER ---
 st.write("---")
 st.caption("AfexCloud Dashboard | Visual Inspection Tool Active")
+
