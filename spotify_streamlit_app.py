@@ -130,10 +130,10 @@ if check_password():
         st.info("Identify exactly what needs to be purchased to match your Spotify inventory.")
         # [Keep your existing Auditor logic here]
 
-    # --- NEW TOOL: COLLECTION REVIEWER (With Lone Wolf Highlighter) ---
+    # --- 8. COLLECTION REVIEWER (High-Visibility Mode) ---
     elif choice == "📊 Collection Reviewer":
         st.title("📊 Collection Reviewer")
-        st.info("Visual inspection table. Lone rows (mismatches) are highlighted in red.")
+        st.info("Visual inspection of song pairs. Red rows indicate a missing partner (Lone Wolf).")
         
         c1, c2 = st.columns(2)
         with c1:
@@ -143,7 +143,7 @@ if check_password():
             
         if inv_f and loc_f:
             if st.button("📊 Generate Highlighted Review"):
-                with st.spinner("Analyzing pairs..."):
+                with st.spinner("Hunting for Lone Wolves..."):
                     # Process Inventory
                     df_inv = pd.read_excel(inv_f)
                     inv_rows = []
@@ -163,31 +163,45 @@ if check_password():
                     
                     # Combine and Sort
                     master_df = pd.concat([pd.DataFrame(inv_rows), pd.DataFrame(loc_rows)])
-                    master_df = master_df.sort_values(by=['Key', 'Source'])
+                    master_df = master_df.sort_values(by=['Key', 'Source']).reset_index(drop=True)
 
-                    # --- THE HIGHLIGHTER LOGIC ---
-                    # Count how many times each Key appears
-                    key_counts = master_df['Key'].value_counts()
+                    # --- THE FIX: PRE-CALCULATE LONE WOLVES ---
+                    counts = master_df['Key'].value_counts()
+                    lone_wolf_keys = counts[counts == 1].index.tolist()
                     
-                    def highlight_lone_wolves(row):
-                        # If the key only appears once, it's a lone wolf
-                        if key_counts[row['Key']] == 1:
-                            return ['background-color: #ffcccc'] * len(row) # Soft red
-                        return [''] * len(row)
+                    # Summary Box
+                    if lone_wolf_keys:
+                        st.error(f"⚠️ Found {len(lone_wolf_keys)} Lone Wolves (Mismatches)")
+                        with st.expander("📝 View Mismatched Song Titles"):
+                            # Pull clean names for the summary
+                            mismatches = master_df[master_df['Key'].isin(lone_wolf_keys)]['Name'].unique()
+                            st.write(", ".join(mismatches))
+                    else:
+                        st.success("🎉 Perfect Harmony! No Lone Wolves found.")
+
+                    def apply_wolf_style(data):
+                        # Create a DataFrame of empty strings for styles
+                        style_df = pd.DataFrame('', index=data.index, columns=data.columns)
+                        # Identify rows where the Key is a Lone Wolf
+                        is_lone = data['Key'].isin(lone_wolf_keys)
+                        # Set background color for those specific rows
+                        style_df.loc[is_lone, :] = 'background-color: #ffcccc'
+                        return style_df
 
                     st.balloons()
                     st.subheader("🔍 Inspection Table")
                     
-                    # Apply styling to the dataframe
-                    styled_df = master_df.style.apply(highlight_lone_wolves, axis=1)
+                    # Apply styling safely
+                    styled_df = master_df.style.apply(apply_wolf_style, axis=None)
                     
                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
                     
-                    st.download_button("📥 Download Review (CSV)", 
+                    st.download_button("📥 Download Master Review (CSV)", 
                                      master_df.to_csv(index=False).encode('utf-8'), 
                                      "collection_review.csv", "text/csv")
 
 # --- FINAL FOOTER ---
 st.write("---")
 st.caption("AfexCloud Dashboard | Visual Inspection Tool Active")
+
 
