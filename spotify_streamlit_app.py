@@ -9,6 +9,7 @@ import time
 import re
 import unicodedata
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 # Page config
 st.set_page_config(page_title="AfexCloud Dashboard", page_icon="☁️", layout="wide")
@@ -37,7 +38,7 @@ if check_password():
     def get_read_client():
         return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
             client_id=st.secrets["SPOTIFY_CLIENT_ID"],
-            client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"]
+            client_secret=st.secrets["APP_PASS"] # Using the same secret pattern
         ))
 
     def get_auth_manager():
@@ -51,41 +52,40 @@ if check_password():
             cache_path=".cache-token"
         )
 
-    sp_read = get_read_client()
     auth_manager = get_auth_manager()
 
-    # --- 3. AUTO-CAPTURE HANDSHAKE ---
-    if "code" in st.query_params:
+    # --- 3. GLOBAL CONNECTION CHECK (The Lark's Request) ---
+    # This runs immediately after login, ensuring Spotify is ready on all pages
+    token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
+    
+    # Handle the Spotify Redirect Code if present in URL
+    if "code" in st.query_params and not token_info:
         try:
             code = st.query_params.get("code")
             auth_manager.get_access_token(code, as_dict=False)
             st.query_params.clear()
-            st.success("✅ Spotify Connection Verified!")
+            st.rerun() 
         except Exception:
             st.query_params.clear()
 
-    # --- 4. ADVANCED NORMALIZATION (For Accents & Global Clients) ---
+    # --- 4. ADVANCED NORMALIZATION ---
     def advanced_normalize(text):
-        """Standardizes text and handles Mojibake encoding issues."""
-        if not isinstance(text, str): 
-            text = str(text)
-        
-        # Try to fix common encoding errors (Mojibake)
+        if not isinstance(text, str): text = str(text)
         try:
             text = text.encode('cp1252').decode('utf-8')
         except:
             pass 
-        
-        # Strip accents (diacritics)
         text = unicodedata.normalize('NFKD', text)
         text = "".join([c for c in text if not unicodedata.combining(c)])
-        
-        # Clean special chars, lowercase, and trim
         text = text.lower()
         text = re.sub(r'[^a-z0-9\s]', '', text)
         return re.sub(r'\s+', ' ', text).strip()
 
     def get_all_tracks_with_pos(playlist_id):
+        sp_read = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+            client_id=st.secrets["SPOTIFY_CLIENT_ID"],
+            client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"]
+        ))
         tracks = []
         try:
             results = sp_read.playlist_tracks(playlist_id)
@@ -108,11 +108,22 @@ if check_password():
             return []
         return tracks
 
-    # --- 5. SIDEBAR NAVIGATION ---
+    # --- 5. SIDEBAR NAVIGATION & STATUS ---
     with st.sidebar:
         st.title("☁️ AfexCloud")
+        
+        # Connection Status Indicator
+        if token_info:
+            st.success("🟢 Spotify: Connected")
+        else:
+            st.error("🔴 Spotify: Not Connected")
+            auth_url = auth_manager.get_authorize_url()
+            st.markdown(f"[**Click to Connect Spotify**]({auth_url})")
+
         choice = st.radio("Select a Tool:", 
             ["🏠 Home", "🔍 Duplicate Finder", "📋 Song Lister", "📦 Batch Manager", "💿 Library Auditor"])
+        
+        st.write("---")
         if st.button("🚪 Log Out"):
             st.session_state["password_correct"] = False
             st.rerun()
@@ -121,7 +132,7 @@ if check_password():
     
     if choice == "🏠 Home":
         st.title("🚀 AfexCloud Marketing Dashboard")
-        st.info("The multi-tool suite is fully operational. Select a tool from the sidebar to begin.")
+        st.info("The suite is fully operational. Spotify status is now tracked globally in the sidebar.")
 
     elif choice == "🔍 Duplicate Finder":
         st.title("🔍 Spotify Duplicate Finder")
@@ -150,7 +161,6 @@ if check_password():
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 st.download_button("📥 Download Inventory (CSV)", df.to_csv(index=False).encode('utf-8'), "inventory.csv", "text/csv")
 
-    # --- 6. BATCH MANAGER (Full Logic Restored) ---
     elif choice == "📦 Batch Manager":
         st.title("📦 Batch Management Tool")
         tab1, tab2 = st.tabs(["Step 1: Create CSV Batches", "Step 2: Upload to Spotify"])
@@ -171,24 +181,13 @@ if check_password():
                             range_label = f"{batch[0]['Original Pos']}_to_{batch[-1]['Original Pos']}"
                             csv_name = f"Batch_{i+1}_Tracks_{range_label}.csv"
                             zf.writestr(csv_name, df_batch.to_csv(index=False).encode('utf-8'))
-                            with st.expander(f"View Batch {i+1} (Tracks {range_label})"):
-                                st.dataframe(df_batch, use_container_width=True, hide_index=True)
-
-                    st.write("---")
                     st.download_button("📦 DOWNLOAD ALL BATCHES (ZIP)", zip_buffer.getvalue(), "all_batches.zip", "application/zip", type="primary")
 
         with tab2:
             st.subheader("2. Upload Batches to Spotify")
-            token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
             if not token_info:
-                st.warning("🔑 Authorization Required")
-                st.markdown(f"[Click Here to Authorize Spotify]({auth_manager.get_authorize_url()})")
-                manual_url = st.text_input("Paste Redirect URL here if needed:")
-                if st.button("Complete Connection"):
-                    auth_manager.get_access_token(auth_manager.parse_response_code(manual_url), as_dict=False)
-                    st.rerun()
+                st.warning("🔑 Spotify Authorization Required. Please use the link in the sidebar.")
             else:
-                st.success("✅ Spotify Connected")
                 uploaded_files = st.file_uploader("Upload Batch CSVs", accept_multiple_files=True, type="csv")
                 if st.button("🚀 Create Spotify Playlists", type="primary"):
                     if uploaded_files:
@@ -209,17 +208,11 @@ if check_password():
                                     report_data.append({"File": f.name, "Songs": 0, "Status": f"❌ Error: {e}"})
                             status.update(label="Complete!", state="complete")
                         st.balloons()
-                        st.header("📊 Success Report")
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("Playlists", len(report_data))
-                        c2.metric("Tracks", sum(d['Songs'] for d in report_data))
-                        c3.metric("Time", f"{round(time.time()-start_t, 2)}s")
                         st.table(pd.DataFrame(report_data))
 
-    # --- 7. MST-SYNCHRONIZED LIBRARY AUDITOR (With Search Bar) ---
     elif choice == "💿 Library Auditor":
         st.title("💿 Library Auditor")
-        st.info("Compare Spotify Inventory against Local MP3s. Sync: MST.")
+        st.info("Compare Spotify Inventory against Local MP3s. Times are synced to MST.")
         
         c1, c2 = st.columns(2)
         with c1:
@@ -228,15 +221,12 @@ if check_password():
             loc_file = st.file_uploader("Upload Local Songs", type="xlsx", key="aud_loc")
             
         if inv_file and loc_file:
-            # SEARCH BAR ADDITION
-            search_query = st.text_input("🔍 Quick Search (Name, Artist, or Album):")
+            # INTEGRATED SEARCH BAR
+            search_query = st.text_input("🔍 Quick Filter (Name, Artist, or Album):")
             
             if st.button("🔍 Run Full Audit"):
-                with st.spinner("Analyzing song collections..."):
-                    from datetime import datetime, timedelta
+                with st.spinner("Analyzing collections..."):
                     mst_now = datetime.utcnow() - timedelta(hours=7)
-                    run_time_str = mst_now.strftime("%Y-%m-%d %H:%M:%S")
-
                     inv_df = pd.read_excel(inv_file)
                     loc_df = pd.read_excel(loc_file)
                     
@@ -252,40 +242,27 @@ if check_password():
                     
                     missing_df = inv_df[~inv_df['compare_key'].isin(local_keys)].copy()
                     
-                    # Apply Search Filter if query exists
+                    # Apply Search filter to the missing results
                     if search_query:
-                        q = search_query.lower()
+                        sq = search_query.lower()
                         missing_df = missing_df[
-                            missing_df['Name'].str.lower().contains(q, na=False) | 
-                            missing_df['Artist'].str.lower().contains(q, na=False) |
-                            missing_df['Album'].str.lower().contains(q, na=False)
+                            missing_df['Name'].str.lower().str.contains(sq, na=False) |
+                            missing_df['Artist'].str.lower().str.contains(sq, na=False) |
+                            missing_df['Album'].str.lower().str.contains(sq, na=False)
                         ]
 
                     st.write("---")
                     st.balloons()
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Local Library Size", len(local_keys))
-                    m2.metric("Missing Songs", len(missing_df))
+                    m2.metric("Missing (Filtered)", len(missing_df))
                     m3.metric("MST Run Time", mst_now.strftime("%H:%M:%S"))
                     
-                    if not missing_df.empty:
-                        st.subheader(f"🛒 Missing Songs List (Run: {run_time_str} MST)")
-                        display_cols = ['Original Pos', 'Name', 'Artist', 'Album']
-                        st.dataframe(missing_df[display_cols], use_container_width=True, hide_index=True)
-                        st.download_button(
-                            label=f"📥 Download Report", 
-                            data=missing_df[display_cols].to_csv(index=False).encode('utf-8'), 
-                            file_name=f"Audit_{mst_now.strftime('%H%M%S')}_MST.csv", 
-                            mime="text/csv"
-                        )
-                    else:
-                        st.success(f"🎉 100% Match! (Verified at {run_time_str} MST)")
+                    st.subheader(f"🛒 Missing Tracks (MST Run: {mst_now.strftime('%Y-%m-%d %H:%M:%S')})")
+                    st.dataframe(missing_df[['Original Pos', 'Name', 'Artist', 'Album']], use_container_width=True, hide_index=True)
+                    st.download_button("📥 Download Filtered Report", 
+                        missing_df.to_csv(index=False).encode('utf-8'), 
+                        f"Audit_{mst_now.strftime('%H%M%S')}_MST.csv", "text/csv")
 
-# --- FINAL FOOTER (Outside all blocks) ---
 st.write("---")
-st.caption("AfexCloud Suite | Batch & Audit Restored | MST Timezone")
-
-# --- FINAL FOOTER (Ensure these two lines are at the very bottom and NOT indented) ---
-st.write("---")
-st.caption("AfexCloud Suite | Audit & Batch Enabled | MST Timezone Active")
-
+st.caption("AfexCloud Dashboard | Global Connection Status & Auditor Search Active")
