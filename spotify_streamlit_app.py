@@ -119,7 +119,7 @@ if check_password():
     
     if choice == "🏠 Home":
         st.title("🚀 AfexCloud Marketing Dashboard")
-        st.info("The suite is fully operational. All tools are active.")
+        st.info("Workflow standardized to CSV for maximum team flexibility.")
 
     elif choice == "🔍 Duplicate Finder":
         st.title("🔍 Spotify Duplicate Finder")
@@ -182,34 +182,64 @@ if check_password():
 
     elif choice == "💿 Library Auditor":
         st.title("💿 Library Auditor")
+        st.info("Supports CSV or Excel uploads for maximum flexibility.")
         c1, c2 = st.columns(2)
-        with c1: inv_f = st.file_uploader("Spotify Inventory", type="xlsx", key="aud_inv")
-        with c2: loc_f = st.file_uploader("Local Songs", type="xlsx", key="aud_loc")
+        # UPDATED: File uploaders now accept .csv as well
+        with c1: inv_f = st.file_uploader("Spotify Inventory", type=["csv", "xlsx"], key="aud_inv")
+        with c2: loc_f = st.file_uploader("Local Songs", type=["csv", "xlsx"], key="aud_loc")
+        
         if inv_f and loc_f:
             if st.button("🔍 Run Audit"):
-                df_inv = pd.read_excel(inv_f)
-                df_loc = pd.read_excel(loc_f)
-                # Audit logic implementation
-                st.write("Audit complete.")
+                with st.spinner("Analyzing collections..."):
+                    # Auto-detect file type
+                    df_inv = pd.read_csv(inv_f) if inv_f.name.endswith('.csv') else pd.read_excel(inv_f)
+                    df_loc = pd.read_csv(loc_f) if loc_f.name.endswith('.csv') else pd.read_excel(loc_f)
+                    
+                    mst_now = datetime.utcnow() - timedelta(hours=7)
+                    
+                    df_inv['compare_key'] = df_inv.apply(lambda r: 
+                        f"{advanced_normalize(r['Name'])}__{advanced_normalize(r['Artist'])}__{advanced_normalize(r['Album'])}", axis=1)
+                    
+                    local_keys = set()
+                    # Process Local (Handling Mp3Tag CSV or standard DataFrame)
+                    for entry in df_loc.iloc[:, 0]:
+                        parts = str(entry).split(',') 
+                        if len(parts) >= 3:
+                            k = f"{advanced_normalize(parts[0])}__{advanced_normalize(parts[1])}__{advanced_normalize(parts[2])}"
+                            local_keys.add(k)
+                        else:
+                            # Fallback if CSV is already split into columns
+                            try:
+                                k = f"{advanced_normalize(df_loc.loc[entry.index, 'Name'])}__{advanced_normalize(df_loc.loc[entry.index, 'Artist'])}__{advanced_normalize(df_loc.loc[entry.index, 'Album'])}"
+                                local_keys.add(k)
+                            except: pass
+
+                    missing_df = df_inv[~df_inv['compare_key'].isin(local_keys)].copy()
+                    st.balloons()
+                    st.write(f"MST Run: {mst_now.strftime('%H:%M:%S')}")
+                    st.dataframe(missing_df[['Original Pos', 'Name', 'Artist', 'Album']], use_container_width=True, hide_index=True)
+                    st.download_button("📥 Download Missing List (CSV)", missing_df.to_csv(index=False).encode('utf-8'), "missing_audit.csv", "text/csv")
 
     elif choice == "📊 Collection Reviewer":
         st.title("📊 Collection Reviewer")
         proj_name = st.text_input("📁 Project / Client Name (Optional):")
         c1, c2 = st.columns(2)
-        with c1: inv_f = st.file_uploader("Upload Spotify Inventory", type="xlsx", key="rev_inv")
-        with c2: loc_f = st.file_uploader("Upload Local Songs", type="xlsx", key="rev_loc")
+        # UPDATED: File uploaders now accept .csv as well
+        with c1: inv_f = st.file_uploader("Upload Spotify Inventory", type=["csv", "xlsx"], key="rev_inv")
+        with c2: loc_f = st.file_uploader("Upload Local Songs", type=["csv", "xlsx"], key="rev_loc")
             
         if inv_f and loc_f:
             view_mode = st.radio("Display Mode:", ["Show All Songs", "Show Lone Wolves Only"], horizontal=True)
             if st.button("📊 Generate Smart Review"):
                 with st.spinner("Processing..."):
-                    df_inv = pd.read_excel(inv_f)
+                    df_inv = pd.read_csv(inv_f) if inv_f.name.endswith('.csv') else pd.read_excel(inv_f)
+                    df_loc = pd.read_csv(loc_f) if loc_f.name.endswith('.csv') else pd.read_excel(loc_f)
+                    
                     inv_rows = []
                     for _, row in df_inv.iterrows():
                         k = f"{advanced_normalize(row['Name'])}__{advanced_normalize(row['Artist'])}__{advanced_normalize(row['Album'])}"
                         inv_rows.append({'Source': 'Spotify', 'Name': row['Name'], 'Artist': row['Artist'], 'Album': row['Album'], 'Key': k})
                     
-                    df_loc = pd.read_excel(loc_f)
                     loc_rows = []
                     for entry in df_loc.iloc[:, 0]:
                         parts = str(entry).split(',')
@@ -247,8 +277,8 @@ if check_password():
 
                     st.balloons()
                     st.dataframe(display_df.style.apply(style_wolf, axis=None), use_container_width=True, hide_index=True)
-                    st.download_button("📥 Download Report", display_df.to_csv(index=False).encode('utf-8'), f"Report_{time.strftime('%Y%m%d')}.csv", "text/csv")
+                    st.download_button("📥 Download Report (CSV)", display_df.to_csv(index=False).encode('utf-8'), f"Report_{time.strftime('%Y%m%d')}.csv", "text/csv")
 
 # --- FINAL FOOTER ---
 st.write("---")
-st.caption("AfexCloud Dashboard | Multi-Tool Suite Active")
+st.caption("AfexCloud Dashboard | Universal CSV Support Active")
