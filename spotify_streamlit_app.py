@@ -140,8 +140,22 @@ if check_password():
         choice = st.radio("Select a Tool:", 
             ["🏠 Home", "🔍 Duplicate Finder", "📋 Song Lister", "📦 Batch Manager", "💿 Library Auditor", "📊 Collection Reviewer", "🗑️ Playlist Deleter", "🎵 Musical Analyst"])
         
+        # --- INSERT HERE (Around Line 138) ---
         st.write("---")
-        if st.button("🚪 Log Out"):
+        st.caption("🔧 Connection Troubleshooting")
+        if st.button("🔄 Force Reset Spotify Connection"):
+            import os
+            cache_file = ".cache-token"
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+                st.success("Cache cleared!")
+            else:
+                st.info("No cache file found on server.")
+            st.session_state.clear()
+            st.rerun()
+
+        st.write("---")
+        if st.button("🚪 Log Out"): # This is your existing Line 139
             st.session_state["password_correct"] = False
             st.rerun()
 
@@ -329,3 +343,4 @@ if check_password():
 st.write("---")
 cur_p = st.session_state.get('global_proj', 'Default')
 st.caption(f"AfexCloud Dashboard | Project: {cur_p if cur_p else 'Default'} | Analyst v2.5.1 Active")
+
