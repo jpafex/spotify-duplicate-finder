@@ -271,40 +271,75 @@ if check_password():
 
     elif choice == "🎵 Musical Analyst":
         st.title(f"🎵 Musical Analyst: {st.session_state['global_proj']}")
-        url = st.text_input("Enter Playlist URL/ID:")
+        url = st.text_input("Enter Playlist URL/ID for DNA Scan:")
         if st.button("🔬 Run DNA Scan & Visualize"):
             p_name, tracks = get_playlist_metadata(url)
-            if tracks:
-                sp_read = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=st.secrets["SPOTIFY_CLIENT_ID"], client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"]))
-                t_ids = [t['Spotify - id'] for t in tracks]
-                feats = []
-                for i in range(0, len(t_ids), 100): feats.extend(sp_read.audio_features(t_ids[i:i+100]))
+            
+            # FIX 1: Filter out any tracks that are missing a Spotify ID
+            valid_tracks = [t for t in tracks if t.get('Spotify - id')]
+            
+            if valid_tracks:
+                sp_read = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+                    client_id=st.secrets["SPOTIFY_CLIENT_ID"], 
+                    client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"]
+                ))
                 
-                analysis_data = []
-                for t, f in zip(tracks, feats):
-                    if f:
-                        analysis_data.append({
-                            'Pos': t['Original Pos'], 'Name': t['Name'], 'Artist': t['Artist'], 
-                            'Key': get_key_name(f['key']), 'Mode': "Major" if f['mode'] == 1 else "Minor", 
-                            'BPM': round(f['tempo'], 1), 'Energy': f['energy'], 'Valence': f['valence'],
-                            'Popularity': t['Popularity'], 'Vibe': get_mood_vibe(f['energy'], f['valence']),
-                            'Market Appeal': get_popularity_status(t['Popularity'])
-                        })
-                df_ana = pd.DataFrame(analysis_data)
-                st.write("---")
-                v1, v2, v3, v4 = st.tabs(["Tempo Flow", "Key Dist", "Mood Radar", "Market Appeal"])
-                with v1: st.line_chart(df_ana.set_index('Pos')['BPM'], color="#1DB954")
-                with v2: st.bar_chart(df_ana['Key'].value_counts(), color="#191414")
-                with v3: st.bar_chart(df_ana['Vibe'].value_counts(), color="#FF4B4B")
-                with v4: st.bar_chart(df_ana['Market Appeal'].value_counts(), color="#509BF5")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Avg BPM", round(df_ana['BPM'].mean(), 1))
-                m2.metric("Avg Popularity", f"{int(df_ana['Popularity'].mean())}/100")
-                m3.metric("Dominant Key", df_ana['Key'].mode()[0])
-                st.dataframe(df_ana, use_container_width=True, hide_index=True)
-                st.download_button("📥 Download Analysis", df_ana.to_csv(index=False).encode('utf-8'), f"{safe_proj}_Musical_Analysis.csv", "text/csv")
+                t_ids = [t['Spotify - id'] for t in valid_tracks]
+                feats = []
+                
+                # FIX 2: Added a safety check for the batch loop
+                with st.spinner("Decoding musical DNA..."):
+                    for i in range(0, len(t_ids), 100):
+                        batch = t_ids[i:i+100]
+                        if batch:
+                            try:
+                                batch_feats = sp_read.audio_features(batch)
+                                # Filter out None results from Spotify
+                                feats.extend([f for f in batch_feats if f is not None])
+                            except Exception as e:
+                                st.error(f"Error fetching batch {i//100 + 1}: {e}")
+                
+                # Only proceed if we actually got features back
+                if feats:
+                    analysis_data = []
+                    # Create a lookup for tracks to match them back to features correctly
+                    feat_dict = {f['id']: f for f in feats if f}
+                    
+                    for t in valid_tracks:
+                        f = feat_dict.get(t['Spotify - id'])
+                        if f:
+                            analysis_data.append({
+                                'Pos': t['Original Pos'], 'Name': t['Name'], 'Artist': t['Artist'], 
+                                'Key': get_key_name(f['key']), 'Mode': "Major" if f['mode'] == 1 else "Minor", 
+                                'BPM': round(f['tempo'], 1), 'Energy': f['energy'], 'Valence': f['valence'],
+                                'Popularity': t['Popularity'], 'Vibe': get_mood_vibe(f['energy'], f['valence']),
+                                'Market Appeal': get_popularity_status(t['Popularity'])
+                            })
+                    
+                    df_ana = pd.DataFrame(analysis_data)
+                    
+                    # Display Charts and Metrics
+                    st.write("---")
+                    v1, v2, v3, v4 = st.tabs(["Tempo Flow", "Key Dist", "Mood Radar", "Market Appeal"])
+                    with v1: st.line_chart(df_ana.set_index('Pos')['BPM'], color="#1DB954")
+                    with v2: st.bar_chart(df_ana['Key'].value_counts(), color="#191414")
+                    with v3: st.bar_chart(df_ana['Vibe'].value_counts(), color="#FF4B4B")
+                    with v4: st.bar_chart(df_ana['Market Appeal'].value_counts(), color="#509BF5")
+                    
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Avg BPM", round(df_ana['BPM'].mean(), 1))
+                    m2.metric("Avg Popularity", f"{int(df_ana['Popularity'].mean())}/100")
+                    m3.metric("Dominant Key", df_ana['Key'].mode()[0])
+                    
+                    st.dataframe(df_ana, use_container_width=True, hide_index=True)
+                    st.download_button("📥 Download Analysis", df_ana.to_csv(index=False).encode('utf-8'), f"{safe_proj}_Analysis.csv", "text/csv")
+                else:
+                    st.error("Could not retrieve audio features from Spotify for these tracks.")
+            else:
+                st.warning("No valid tracks found in this playlist to analyze.")
 
 # --- FINAL FOOTER ---
 st.write("---")
 cur_p = st.session_state.get('global_proj', 'Default')
 st.caption(f"AfexCloud Dashboard | Project: {cur_p if cur_p else 'Default'} | Analyst v2.5 Active")
+
