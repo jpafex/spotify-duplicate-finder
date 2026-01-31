@@ -113,10 +113,12 @@ if check_password():
     with st.sidebar:
         st.title("☁️ AfexCloud")
         
-        # New: Global Project Field (Applied to all tools)
+        # Updated Sidebar Input
         st.write("---")
-        global_proj = st.text_input("📁 Global Project / Client Name:", 
-                                     placeholder="e.g. AN_Construction_Jan_Audit")
+        st.session_state['global_proj'] = st.text_input("📁 Global Project / Client Name:", 
+                                         value=st.session_state['global_proj'],
+                                         placeholder="e.g. AN_Construction_Jan_Audit")
+        global_proj = st.session_state['global_proj']
         st.write("---")
 
         if token_info:
@@ -258,5 +260,6 @@ if check_password():
 
 # --- FINAL FOOTER ---
 st.write("---")
-st.caption(f"AfexCloud Dashboard | Project: {global_proj if global_proj else 'Default'} | MST Active")
-
+# We use st.session_state here to ensure it never throws a NameError
+current_proj = st.session_state.get('global_proj', 'Default')
+st.caption(f"AfexCloud Dashboard | Project: {current_proj if current_proj else 'Default'} | MST Active")
