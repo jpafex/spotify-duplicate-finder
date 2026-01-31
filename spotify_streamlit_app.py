@@ -9,6 +9,7 @@ import time
 import re
 import unicodedata
 import requests
+import random
 from collections import defaultdict
 from datetime import datetime
 
@@ -55,7 +56,6 @@ if check_password():
     auth_manager = get_auth_manager()
     token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
 
-    # Handle Spotify OAuth Redirect Code
     if "code" in st.query_params and not token_info:
         try:
             auth_manager.get_access_token(st.query_params.get("code"), as_dict=False)
@@ -97,30 +97,34 @@ if check_password():
                         pos += 1
                 results = sp_read.next(results) if results['next'] else None
             return p_name, tracks
-        except Exception as e:
-            st.error(f"API Error: {e}")
-            return "Unknown", []
+        except: return "Unknown", []
 
-    # --- 5. SIDECAR SCRAPER (MULTI-SOURCE) ---
-    def search_tunebat(query):
-        url = f"https://tunebat.com/Search?q={query.replace(' ', '%20')}"
-        headers = {"User-Agent": "Mozilla/5.0"}
+    # --- 5. THE TRIPLE-SOURCE SCRAPER ENGINE ---
+    def hunt_dna(name, artist):
+        query = f"{name} {artist}".replace(" ", "+")
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        
+        # Source 1: Tunebat Deep Hunt
         try:
-            r = requests.get(url, headers=headers, timeout=5)
-            key = re.search(r'Key:\s*([A-G][#b]?\s*(?:Major|Minor|maj|min)?)', r.text, re.I)
-            bpm = re.search(r'BPM:\s*(\d+)', r.text, re.I)
-            return (key.group(1) if key else "Not Found", bpm.group(1) if bpm else "Not Found")
-        except: return ("Not Found", "Not Found")
+            r = requests.get(f"https://tunebat.com/Search?q={query}", headers=headers, timeout=8)
+            match = re.search(r'href="(/Info/[^"]+)"', r.text)
+            if match:
+                time.sleep(random.uniform(0.5, 1.2))
+                r_info = requests.get(f"https://tunebat.com{match.group(1)}", headers=headers, timeout=8)
+                key = re.search(r'>Key<.*?secondary-label">([^<]+)', r_info.text, re.S)
+                bpm = re.search(r'>BPM<.*?secondary-label">([^<]+)', r_info.text, re.S)
+                if key and bpm: return key.group(1).strip(), bpm.group(1).strip(), "Tunebat"
+        except: pass
 
-    def search_getsongbpm(query):
-        url = f"https://getsongbpm.com/search?q={query.replace(' ', '+')}"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        # Source 2: GetSongBPM Fallback
         try:
-            r = requests.get(url, headers=headers, timeout=5)
-            bpm = re.search(r'data-bpm="(\d+)"', r.text)
-            key = re.search(r'data-key="([^"]+)"', r.text)
-            return (key.group(1) if key else "Not Found", bpm.group(1) if bpm else "Not Found")
-        except: return ("Not Found", "Not Found")
+            r_gsb = requests.get(f"https://getsongbpm.com/search?q={query}", headers=headers, timeout=8)
+            key = re.search(r'data-key="([^"]+)"', r_gsb.text)
+            bpm = re.search(r'data-bpm="(\d+)"', r_gsb.text)
+            if key and bpm: return key.group(1).strip(), bpm.group(1).strip(), "GetSongBPM"
+        except: pass
+
+        return "Not Found", "Not Found", "None"
 
     # --- 6. SIDEBAR NAVIGATION ---
     with st.sidebar:
@@ -249,48 +253,37 @@ if check_password():
                 with st.form("del_form"):
                     to_del = []
                     for p in st.session_state['my_playlists']:
-                        # Displaying ID per request for downstream validation
                         if st.checkbox(f"{p['name']} (ID: {p['id']})"): to_del.append({'id': p['id'], 'name': p['name']})
                     if st.form_submit_button("🔥 DELETE SELECTED"):
                         for item in to_del: sp.current_user_unfollow_playlist(item['id'])
                         st.success(f"Deleted {len(to_del)} playlists.")
-                        # Provide deletion log for validation
-                        del_log = pd.DataFrame(to_del)
-                        st.download_button("📥 Download Deletion Log", del_log.to_csv(index=False).encode('utf-8'), f"Deletion_Log_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+                        log = pd.DataFrame(to_del)
+                        st.download_button("📥 Download Deletion Proof", log.to_csv(index=False).encode('utf-8'), f"Deletion_Proof_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
                         del st.session_state['my_playlists']; st.rerun()
 
     elif choice == "🕵️ Sidecar Scraper":
-        st.title("🕵️ Sidecar Musical Scraper")
-        st.info("Uses public web databases (Tunebat & GetSongBPM) to find musical DNA. No Spotify API needed.")
-        inv_f = st.file_uploader("Upload Spotify Inventory (CSV)", type="csv")
+        st.title("🕵️ Sidecar Musical Scraper (v3.0.1)")
+        st.info("No API Costs. Using public music databases to build your DNA logs.")
+        inv_f = st.file_uploader("Upload Inventory CSV", type="csv")
+        
         if inv_f:
             df_inv = pd.read_csv(inv_f)
-            if st.button("🚀 Start Multi-Source Hunt"):
-                res = []
-                prog = st.progress(0)
+            if st.button("🚀 Start Multi-Source Scrape"):
+                results, prog = [], st.progress(0)
+                status_text = st.empty()
                 for i, row in df_inv.iterrows():
-                    name, artist = row['Name'], row['Artist']
-                    q = f"{name} {artist}"
-                    st.write(f"Hunting: {name}...")
-                    
-                    # Try Source 1: Tunebat
-                    key, bpm = search_tunebat(q)
-                    source = "Tunebat"
-                    
-                    # Fallback to Source 2: GetSongBPM
-                    if key == "Not Found" or bpm == "Not Found":
-                        key, bpm = search_getsongbpm(q)
-                        source = "GetSongBPM" if key != "Not Found" else "None"
-                    
-                    res.append({'Name': name, 'Artist': artist, 'Key': key, 'BPM': bpm, 'Source': source})
+                    status_text.write(f"Scraping ({i+1}/{len(df_inv)}): **{row['Name']}**")
+                    k, b, src = hunt_dna(row['Name'], row['Artist'])
+                    results.append({'Key': k, 'BPM': b, 'Source': src})
                     prog.progress((i + 1) / len(df_inv))
-                    time.sleep(1.0) # Be nice to servers
+                    time.sleep(random.uniform(0.8, 1.5))
                 
-                df_res = pd.DataFrame(res)
-                st.success("Analysis Complete!")
-                st.dataframe(df_res, use_container_width=True, hide_index=True)
-                st.download_button("📥 Download DNA Report", df_res.to_csv(index=False).encode('utf-8'), f"{safe_proj}_Web_DNA.csv", "text/csv")
+                df_final = pd.concat([df_inv, pd.DataFrame(results)], axis=1)
+                st.success("DNA Hunt Complete!")
+                st.dataframe(df_final, use_container_width=True, hide_index=True)
+                st.download_button("📥 Download Master DJ Log", df_final.to_csv(index=False).encode('utf-8'), f"{safe_proj}_Master_DJ_Log.csv", "text/csv")
 
 # --- FINAL FOOTER ---
 st.write("---")
-st.caption(f"AfexCloud v2.8 | Project: {st.session_state.get('global_proj', 'Default')} | Multi-Source Scraper Active")
+cur_p = st.session_state.get('global_proj', 'Default')
+st.caption(f"AfexCloud v3.0.1 | Project: {cur_p if cur_p else 'Default'} | Multi-Source Scraper Active")
