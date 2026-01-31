@@ -14,6 +14,10 @@ from datetime import datetime, timedelta
 # Page config
 st.set_page_config(page_title="AfexCloud Dashboard", page_icon="☁️", layout="wide")
 
+# FIX: Initialize the global variable here so the footer can always see it
+if 'global_proj' not in st.session_state:
+    st.session_state['global_proj'] = ""
+
 # --- 1. SECURE LOGIN GATE ---
 def check_password():
     if "password_correct" not in st.session_state:
@@ -255,3 +259,4 @@ if check_password():
 # --- FINAL FOOTER ---
 st.write("---")
 st.caption(f"AfexCloud Dashboard | Project: {global_proj if global_proj else 'Default'} | MST Active")
+
