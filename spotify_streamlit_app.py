@@ -8,33 +8,37 @@ import zipfile
 import time
 import re
 import unicodedata
+import requests
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Page config
 st.set_page_config(page_title="AfexCloud Dashboard", page_icon="☁️", layout="wide")
 
-# --- 1. GLOBAL STATE INITIALIZATION ---
-# Initialize session state variables if they don't exist
+# --- 1. GLOBAL STATE & AUTH FIX ---
+# We initialize state at the very top to ensure it survives the rerun
 if 'password_correct' not in st.session_state:
     st.session_state['password_correct'] = False
 if 'global_proj' not in st.session_state:
     st.session_state['global_proj'] = ""
 
-# --- 2. SECURE LOGIN GATE ---
+# --- 2. SECURE LOGIN GATE (Logic Re-organized) ---
 def check_password():
-    if not st.session_state.get("password_correct"):
+    """Returns True if the user had the correct password."""
+    def password_entered():
+        if st.session_state["username"] == st.secrets["APP_USER"] and \
+           st.session_state["password"] == st.secrets["APP_PASS"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+            del st.session_state["username"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if not st.session_state["password_correct"]:
         st.title("🔐 AfexCloud Tool Login")
-        with st.form("login_form"):
-            user_input = st.text_input("Username")
-            pass_input = st.text_input("Password", type="password")
-            submit = st.form_submit_button("Login")
-            if submit:
-                if user_input == st.secrets["APP_USER"] and pass_input == st.secrets["APP_PASS"]:
-                    st.session_state["password_correct"] = True
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials.")
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        st.button("Login", on_click=password_entered)
         return False
     return True
 
@@ -42,7 +46,6 @@ if check_password():
     
     # --- 3. AUTHENTICATION ENGINES ---
     def get_auth_manager():
-        # Scopes reduced to core playlist permissions to maximize stability
         scope = "playlist-modify-public playlist-modify-private playlist-read-private"
         return SpotifyOAuth(
             client_id=st.secrets["SPOTIFY_CLIENT_ID"],
@@ -56,15 +59,14 @@ if check_password():
     auth_manager = get_auth_manager()
     token_info = auth_manager.validate_token(auth_manager.cache_handler.get_cached_token())
 
-    # Handle Spotify OAuth Redirect
+    # --- THE "DOUBLE LOGIN" FIX ---
+    # We handle the 'code' parameter silently without forced reruns that break the session
     if "code" in st.query_params and not token_info:
         try:
-            code = st.query_params.get("code")
-            auth_manager.get_access_token(code, as_dict=False)
-            st.query_params.clear()
-            st.rerun() 
-        except Exception:
-            st.query_params.clear()
+            auth_manager.get_access_token(st.query_params.get("code"), as_dict=False)
+            st.query_params.clear() # Clear the code from URL
+        except:
+            pass
 
     # --- 4. ADVANCED HELPERS ---
     def advanced_normalize(text):
@@ -107,6 +109,22 @@ if check_password():
             st.error(f"Spotify API Error: {e}")
             return "Unknown", []
 
+    # --- NEW: SIDECAR SCRAPER LOGIC ---
+    def scrape_key_bpm(track_name, artist_name):
+        """Scrapes Tunebat for Key and BPM data without API"""
+        query = f"{track_name} {artist_name}".replace(" ", "%20")
+        url = f"https://tunebat.com/Search?q={query}"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        try:
+            resp = requests.get(url, headers=headers, timeout=5)
+            # Simple regex search based on your team's provided scraper
+            key_search = re.search(r'data-key="([^"]+)"', resp.text)
+            bpm_search = re.search(r'data-bpm="([^"]+)"', resp.text)
+            return (key_search.group(1) if key_search else "Not Found", 
+                    bpm_search.group(1) if bpm_search else "Not Found")
+        except:
+            return "Error", "Error"
+
     # --- 5. SIDEBAR NAVIGATION ---
     with st.sidebar:
         st.title("☁️ AfexCloud")
@@ -120,18 +138,8 @@ if check_password():
         else: st.error("🔴 Spotify: Not Connected"); st.markdown(f"[Connect Spotify]({auth_manager.get_authorize_url()})")
 
         choice = st.radio("Select a Tool:", 
-            ["🏠 Home", "🔍 Duplicate Finder", "📋 Song Lister", "📦 Batch Manager", "💿 Library Auditor", "📊 Collection Reviewer", "🗑️ Playlist Deleter"])
+            ["🏠 Home", "🔍 Duplicate Finder", "📋 Song Lister", "📦 Batch Manager", "💿 Library Auditor", "📊 Collection Reviewer", "🗑️ Playlist Deleter", "🕵️ Sidecar Scraper"])
         
-        st.write("---")
-        st.caption("🔧 Troubleshooting")
-        if st.button("🔄 Reset Spotify Connection"):
-            import os
-            cache_file = ".cache-token"
-            if os.path.exists(cache_file): os.remove(cache_file)
-            # Reset only project/connection variables, preserving the login gate
-            st.session_state['global_proj'] = ""
-            st.rerun()
-
         st.write("---")
         if st.button("🚪 Log Out"):
             st.session_state["password_correct"] = False
@@ -144,7 +152,6 @@ if check_password():
     if choice == "🏠 Home":
         st.title("🚀 AfexCloud Marketing Dashboard")
         st.info(f"Active Project: **{st.session_state['global_proj'] if st.session_state['global_proj'] else 'None Set'}**")
-        st.write("Welcome to the stabilized dashboard. All tools are currently running on core API scopes.")
 
     elif choice == "🔍 Duplicate Finder":
         st.title(f"🔍 Duplicate Finder: {st.session_state['global_proj']}")
@@ -156,11 +163,11 @@ if check_password():
                 for t in tracks: by_id[t['Spotify - id']].append(t)
                 dupes = [i for g in by_id.values() if len(g) > 1 for i in g]
                 if dupes:
-                    st.warning(f"Found {len(dupes)} duplicates in '{p_name}'.")
+                    st.warning(f"Found {len(dupes)} duplicates.")
                     df_dupes = pd.DataFrame(dupes)
                     st.dataframe(df_dupes, use_container_width=True, hide_index=True)
                     st.download_button("📥 Download Dupes", df_dupes.to_csv(index=False).encode('utf-8'), f"{safe_proj}_dupes.csv", "text/csv")
-                else: st.success(f"No duplicates found in '{p_name}'!")
+                else: st.success("No duplicates found!")
 
     elif choice == "📋 Song Lister":
         st.title(f"📋 Song Lister: {st.session_state['global_proj']}")
@@ -190,9 +197,8 @@ if check_password():
                             range_lbl = f"{batch[0]['Original Pos']}_to_{batch[-1]['Original Pos']}"
                             c_name = f"{safe_proj + '_' if safe_proj else ''}{clean_p_name}_Batch_{i+1}_{range_lbl}.csv"
                             zf.writestr(c_name, df_batch.to_csv(index=False).encode('utf-8'))
-                    st.download_button(f"📦 DOWNLOAD ZIP ({p_name})", zip_buffer.getvalue(), f"{safe_proj}_Batches.zip", "application/zip")
+                    st.download_button(f"📦 DOWNLOAD ZIP", zip_buffer.getvalue(), f"{safe_proj}_Batches.zip", "application/zip")
         with tab2:
-            st.subheader("2. Upload to Spotify")
             if not token_info: st.warning("Connect Spotify first.")
             else:
                 files = st.file_uploader("Upload Batch CSVs", accept_multiple_files=True, type="csv")
@@ -217,7 +223,6 @@ if check_password():
                 loc_keys = {f"{advanced_normalize(str(e).split(',')[0])}__{advanced_normalize(str(e).split(',')[1])}__{advanced_normalize(str(e).split(',')[2])}" for e in df_loc.iloc[:, 0] if len(str(e).split(',')) >= 3}
                 missing_df = df_inv[~df_inv['compare_key'].isin(loc_keys)].copy()
                 st.balloons()
-                st.metric("Missing Tracks", len(missing_df))
                 st.dataframe(missing_df[['Original Pos', 'Name', 'Artist', 'Album']], use_container_width=True, hide_index=True)
                 st.download_button("📥 Download Missing List", missing_df.to_csv(index=False).encode('utf-8'), f"{safe_proj}_Missing.csv", "text/csv")
 
@@ -240,7 +245,6 @@ if check_password():
                 counts = master_df['Key'].value_counts()
                 lone_wolf_keys = counts[counts == 1].index.tolist()
                 st.write("---")
-                st.subheader(f"📊 Health: {st.session_state['global_proj']}")
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Tracks", len(master_df))
                 c2.metric("Mismatches", len(lone_wolf_keys), delta_color="inverse")
@@ -263,19 +267,40 @@ if check_password():
             if 'my_playlists' in st.session_state:
                 with st.form("delete_form"):
                     to_delete = []
-                    # Enhanced checkboxes with Spotify Playlist ID for downstream validation
                     for p in st.session_state['my_playlists']:
                         label = f"{p['name']} (ID: {p['id']}) — {p['tracks']['total']} tracks"
-                        if st.checkbox(label, key=p['id']):
-                            to_delete.append(p['id'])
-                    
+                        if st.checkbox(label, key=p['id']): to_delete.append(p['id'])
                     if st.form_submit_button("🔥 DELETE SELECTED"):
                         for pid in to_delete: sp_write.current_user_unfollow_playlist(pid)
-                        st.success(f"Successfully deleted {len(to_delete)} playlists.")
-                        del st.session_state['my_playlists']
-                        st.rerun()
+                        st.success(f"Deleted {len(to_delete)} playlists."); del st.session_state['my_playlists']; st.rerun()
+
+    # --- 7. NEW TOOL: SIDECAR SCRAPER ---
+    elif choice == "🕵️ Sidecar Scraper":
+        st.title("🕵️ Sidecar Musical Scraper")
+        st.info("Bypasses Spotify API. Upload your Inventory CSV to find musical Keys and BPM via Tunebat.")
+        
+        inv_f = st.file_uploader("Upload Spotify Inventory (CSV)", type="csv")
+        if inv_f:
+            df_inv = pd.read_csv(inv_f)
+            if st.button("🚀 Start Web Scrape"):
+                results = []
+                progress_bar = st.progress(0)
+                total = len(df_inv)
+                
+                for i, row in df_inv.iterrows():
+                    name, artist = row['Name'], row['Artist']
+                    st.write(f"Hunting: {name} by {artist}...")
+                    key, bpm = scrape_key_bpm(name, artist)
+                    results.append({'Name': name, 'Artist': artist, 'Key': key, 'BPM': bpm})
+                    progress_bar.progress((i + 1) / total)
+                    time.sleep(0.5) # Sleep to avoid rate limiting
+                
+                df_scraped = pd.DataFrame(results)
+                st.success("Scrape Complete!")
+                st.dataframe(df_scraped, use_container_width=True, hide_index=True)
+                st.download_button("📥 Download Scraped DNA (CSV)", df_scraped.to_csv(index=False).encode('utf-8'), f"{safe_proj}_Scraped_DNA.csv", "text/csv")
 
 # --- FINAL FOOTER ---
 st.write("---")
 cur_p = st.session_state.get('global_proj', 'Default')
-st.caption(f"AfexCloud Dashboard | Project: {cur_p if cur_p else 'Default'} | Stabilized v2.6 Deployment")
+st.caption(f"AfexCloud Dashboard | Project: {cur_p if cur_p else 'Default'} | v2.7 deployment")
