@@ -27,29 +27,20 @@ def _hide_pages_nav():
     )
 
 def bootstrap_page():
-    """
-    Call at the TOP of every page (and app.py).
-
-    Beta flow:
-    1) Process Spotify callback first (so token exchange works even if login is shown)
-    2) Render sidebar (so Connect Spotify button always exists)
-    3) If not logged in: optionally hide the Pages list, show login form, stop page content
-    """
-    # Always allow Spotify to finish its redirect callback
     auth_manager = get_auth_manager()
     handle_spotify_callback(auth_manager)
 
-    # Always render sidebar, even before login (so Spotify connect button is visible)
-    render_sidebar(auth_manager)
-
-    # Gate the main content
+    # If not logged in, hide Pages nav *before* rendering sidebar/UI
     if not is_logged_in():
-        # Hide multipage bucket list until login (manager request)
         _hide_pages_nav()
 
+    render_sidebar(auth_manager)
+
+    if not is_logged_in():
         ok = show_login_form()
         if not ok:
             st.stop()
+
 
 def render_sidebar(auth_manager=None):
     if auth_manager is None:
