@@ -17,18 +17,14 @@ bootstrap_page()
 # -----------------------------
 
 def extract_playlist_id(playlist_input: str) -> str | None:
-    """Extract playlist ID from a Spotify playlist URL or raw ID."""
     if not playlist_input:
         return None
-
     playlist_input = playlist_input.strip()
 
-    # URL pattern
     m = re.search(r"open\.spotify\.com/playlist/([a-zA-Z0-9]+)", playlist_input)
     if m:
         return m.group(1)
 
-    # Raw ID (Spotify playlist IDs are typically 22 chars)
     if len(playlist_input) == 22 and playlist_input.isalnum():
         return playlist_input
 
@@ -39,14 +35,10 @@ KEY_MAP = {
     0: "C",  1: "C#", 2: "D",  3: "D#", 4: "E",  5: "F",
     6: "F#", 7: "G",  8: "G#", 9: "A", 10: "A#", 11: "B"
 }
-
-# Camelot mapping (major = B, minor = A)
 CAMELOT_MAJOR = {"C":"8B","C#":"3B","D":"10B","D#":"5B","E":"12B","F":"7B","F#":"2B","G":"9B","G#":"4B","A":"11B","A#":"6B","B":"1B"}
 CAMELOT_MINOR = {"C":"5A","C#":"12A","D":"7A","D#":"2A","E":"9A","F":"4A","F#":"11A","G":"6A","G#":"1A","A":"8A","A#":"3A","B":"10A"}
 
-
 def to_camelot(key_name: str | None, mode: int | None) -> str:
-    """mode: 1 = major, 0 = minor"""
     if not key_name or mode is None:
         return "N/A"
     if mode == 1:
@@ -57,9 +49,6 @@ def to_camelot(key_name: str | None, mode: int | None) -> str:
 
 
 def get_access_token_from_session() -> str | None:
-    """
-    Uses the user token created by your sidebar "Connect Spotify" flow.
-    """
     token_info = st.session_state.get("_spotify_token_info")
     if not token_info or not token_info.get("access_token"):
         return None
@@ -69,8 +58,9 @@ def get_access_token_from_session() -> str | None:
 def spotify_call(func, *args, max_retries: int = 6, base_sleep: float = 0.8, **kwargs):
     """
     Retry wrapper for Spotify calls:
-    - Handles 429 rate limits (uses Retry-After if available)
-    - Handles transient 5xx errors with exponential backoff + jitter
+    - 429: retry-after / backoff
+    - 5xx: backoff
+    - 401: token expired/invalid -> raise immediately (user must reconnect)
     """
     attempt = 0
     while True:
@@ -81,34 +71,32 @@ def spotify_call(func, *args, max_retries: int = 6, base_sleep: float = 0.8, **k
             attempt += 1
             status = getattr(e, "http_status", None)
 
-            # Stop if out of retries
+            # Token expired/invalid
+            if status == 401:
+                raise
+
             if attempt > max_retries:
                 raise
 
-            # Rate limit
             if status == 429:
                 retry_after = None
                 try:
                     retry_after = int((e.headers or {}).get("Retry-After", "0"))
                 except Exception:
                     retry_after = None
-
                 sleep_s = retry_after if (retry_after and retry_after > 0) else (base_sleep * (2 ** (attempt - 1)))
-                sleep_s = sleep_s + random.uniform(0, 0.35)
+                sleep_s += random.uniform(0, 0.35)
                 time.sleep(min(sleep_s, 30))
                 continue
 
-            # Transient server errors
             if status in (500, 502, 503, 504):
                 sleep_s = base_sleep * (2 ** (attempt - 1)) + random.uniform(0, 0.35)
                 time.sleep(min(sleep_s, 20))
                 continue
 
-            # Other SpotifyException should bubble up
             raise
 
         except Exception:
-            # Non-Spotify exception: retry a few times (network hiccup)
             attempt += 1
             if attempt > max_retries:
                 raise
@@ -116,29 +104,41 @@ def spotify_call(func, *args, max_retries: int = 6, base_sleep: float = 0.8, **k
             time.sleep(min(sleep_s, 20))
 
 
+def show_missing_summary(df: pd.DataFrame):
+    if df is None or df.empty:
+        return
+
+    total = len(df)
+    missing_bpm = df["bpm"].isna().sum()
+    missing_key = (df["key"] == "N/A").sum()
+    missing_both = (df["bpm"].isna() & (df["key"] == "N/A")).sum()
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Tracks", f"{total}")
+    c2.metric("Missing BPM", f"{missing_bpm} ({missing_bpm/total:.0%})")
+    c3.metric("Missing Key", f"{missing_key} ({missing_key/total:.0%})")
+    c4.metric("Missing Both", f"{missing_both} ({missing_both/total:.0%})")
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
-def analyze_playlist_cached(
-    playlist_id: str,
-    max_tracks: int,
-    access_token: str,
-) -> tuple[dict, pd.DataFrame]:
+def analyze_playlist_cached(playlist_id: str, max_tracks: int, user_cache_key: str) -> tuple[dict, pd.DataFrame]:
     """
-    Cached analyzer:
-    - Fetch playlist tracks
-    - Fetch audio features
-    - Return playlist info + dataframe
-    Cache TTL = 30 minutes (good for beta).
-    Cache key includes access_token (safer for private playlists).
+    Cached analyzer keyed by:
+      - playlist_id
+      - max_tracks
+      - spotify user id (user_cache_key)
+
+    Token is pulled from session at runtime (so we don't destroy caching each time token rotates).
     """
+    access_token = get_access_token_from_session()
+    if not access_token:
+        # If cached call runs without token, just return empty;
+        # UI will prompt connect/reconnect.
+        return {}, pd.DataFrame()
+
     sp = spotipy.Spotify(auth=access_token)
 
-    # Playlist info
-    pl = spotify_call(
-        sp.playlist,
-        playlist_id,
-        fields="name,owner(display_name),tracks.total",
-    )
-
+    pl = spotify_call(sp.playlist, playlist_id, fields="name,owner(display_name),tracks.total")
     total = pl["tracks"]["total"]
     target_total = total if (max_tracks <= 0) else min(total, max_tracks)
 
@@ -159,7 +159,7 @@ def analyze_playlist_cached(
         for it in batch.get("items", []):
             tr = it.get("track")
             if not tr or not tr.get("id"):
-                continue  # local/unavailable
+                continue
 
             artists = ", ".join([a["name"] for a in tr.get("artists", []) if a.get("name")])
             items.append({
@@ -182,7 +182,6 @@ def analyze_playlist_cached(
 
     track_ids = [t["track_id"] for t in items]
 
-    # Fetch audio features in chunks
     feats_by_id = {}
     for i in range(0, len(track_ids), 100):
         chunk = track_ids[i:i + 100]
@@ -196,7 +195,7 @@ def analyze_playlist_cached(
 
         tempo = f.get("tempo", None)
         key_int = f.get("key", None)
-        mode = f.get("mode", None)  # 1 major, 0 minor
+        mode = f.get("mode", None)
 
         key_name = KEY_MAP.get(key_int) if isinstance(key_int, int) and key_int >= 0 else None
         camelot = to_camelot(key_name, mode)
@@ -210,7 +209,6 @@ def analyze_playlist_cached(
             "key": key_name or "N/A",
             "mode": "major" if mode == 1 else ("minor" if mode == 0 else "N/A"),
             "camelot": camelot,
-            # extras
             "danceability": f.get("danceability", None),
             "energy": f.get("energy", None),
             "valence": f.get("valence", None),
@@ -220,24 +218,7 @@ def analyze_playlist_cached(
             "track_id": t["track_id"],
         })
 
-    df = pd.DataFrame(rows)
-    return pl, df
-
-
-def show_missing_summary(df: pd.DataFrame):
-    if df is None or df.empty:
-        return
-
-    total = len(df)
-    missing_bpm = df["bpm"].isna().sum()
-    missing_key = (df["key"] == "N/A").sum()
-    missing_both = (df["bpm"].isna() & (df["key"] == "N/A")).sum()
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Tracks", f"{total}")
-    c2.metric("Missing BPM", f"{missing_bpm} ({missing_bpm/total:.0%})")
-    c3.metric("Missing Key", f"{missing_key} ({missing_key/total:.0%})")
-    c4.metric("Missing Both", f"{missing_both} ({missing_both/total:.0%})")
+    return pl, pd.DataFrame(rows)
 
 
 # -----------------------------
@@ -252,52 +233,77 @@ if access_token is None:
     st.warning("Connect Spotify first using the sidebar button.")
     st.stop()
 
+# Create a client to get user id (for safe multi-user caching)
+sp = spotipy.Spotify(auth=access_token)
+try:
+    me = spotify_call(sp.current_user)
+    user_cache_key = me.get("id", "unknown_user")
+except SpotifyException as e:
+    if getattr(e, "http_status", None) == 401:
+        st.error("Your Spotify session expired. Please click **Disconnect Spotify** then **Connect Spotify** in the sidebar.")
+        st.stop()
+    raise
+
 option = st.radio(
     "Options (beta)",
     ["1) Analyze playlist by URL/ID", "2) Run example test playlist", "3) About / Help"],
     index=0
 )
 
+def run_analysis(playlist_input: str, max_tracks: int):
+    playlist_id = extract_playlist_id(playlist_input)
+    if not playlist_id:
+        st.error("Invalid playlist URL or ID.")
+        return
+
+    with st.spinner("Analyzing playlist (cached + rate-limit safe)…"):
+        try:
+            pl_info, df = analyze_playlist_cached(playlist_id, int(max_tracks), user_cache_key)
+        except SpotifyException as e:
+            status = getattr(e, "http_status", None)
+            if status == 401:
+                st.error("Spotify token expired while analyzing. Please **Disconnect Spotify** then **Connect Spotify** in the sidebar, then retry.")
+                return
+            st.error("Spotify returned an error while fetching audio features.")
+            st.caption(f"HTTP status: {status}")
+            return
+
+    if df is None or df.empty:
+        st.warning("No playable tracks found (or access denied).")
+        return
+
+    pl_name = (pl_info or {}).get("name", "Playlist")
+    owner = ((pl_info or {}).get("owner") or {}).get("display_name", "")
+    st.subheader(f"🎵 {pl_name} — {owner}".strip(" —"))
+
+    show_missing_summary(df)
+
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    safe_proj = st.session_state.get("_safe_proj", "project")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_name = f"{safe_proj}_Sidecar_Analyzer_{stamp}.csv"
+
+    st.download_button(
+        "📥 Download CSV",
+        df.to_csv(index=False).encode("utf-8"),
+        out_name,
+        "text/csv",
+    )
+
+    with st.expander("⚙️ Cache controls"):
+        st.caption("If you update a playlist and want fresh results immediately, clear the cache.")
+        if st.button("Clear Sidecar cache now"):
+            st.cache_data.clear()
+            st.success("Cache cleared. Re-run analysis.")
+
+
 if option.startswith("1"):
     playlist_input = st.text_input("Enter Spotify Playlist URL or ID:")
     max_tracks = st.number_input("Max tracks (0 = ALL)", min_value=0, value=0, step=10)
 
     if st.button("🚀 Analyze Playlist"):
-        playlist_id = extract_playlist_id(playlist_input)
-        if not playlist_id:
-            st.error("Invalid playlist URL or ID.")
-            st.stop()
-
-        with st.spinner("Analyzing playlist (cached + rate-limit safe)…"):
-            pl_info, df = analyze_playlist_cached(playlist_id, int(max_tracks), access_token)
-
-        if df is None or df.empty:
-            st.warning("No playable tracks found (or access denied).")
-        else:
-            pl_name = (pl_info or {}).get("name", "Playlist")
-            owner = ((pl_info or {}).get("owner") or {}).get("display_name", "")
-            st.subheader(f"🎵 {pl_name} — {owner}".strip(" —"))
-
-            show_missing_summary(df)
-
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-            safe_proj = st.session_state.get("_safe_proj", "project")
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_name = f"{safe_proj}_Sidecar_Analyzer_{stamp}.csv"
-
-            st.download_button(
-                "📥 Download CSV",
-                df.to_csv(index=False).encode("utf-8"),
-                out_name,
-                "text/csv",
-            )
-
-            with st.expander("⚙️ Cache controls"):
-                st.caption("If you update a playlist and want fresh results immediately, clear the cache.")
-                if st.button("Clear Sidecar cache now"):
-                    st.cache_data.clear()
-                    st.success("Cache cleared. Re-run analysis.")
+        run_analysis(playlist_input, int(max_tracks))
 
 elif option.startswith("2"):
     test_url = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
@@ -306,19 +312,7 @@ elif option.startswith("2"):
     max_tracks = st.number_input("Max tracks (0 = ALL)", min_value=0, value=15, step=5)
 
     if st.button("🧪 Run Test"):
-        playlist_id = extract_playlist_id(playlist_input)
-        if not playlist_id:
-            st.error("Invalid playlist URL or ID.")
-            st.stop()
-
-        with st.spinner("Running test (cached + rate-limit safe)…"):
-            pl_info, df = analyze_playlist_cached(playlist_id, int(max_tracks), access_token)
-
-        if df is None or df.empty:
-            st.warning("No playable tracks found (or access denied).")
-        else:
-            show_missing_summary(df)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        run_analysis(playlist_input, int(max_tracks))
 
 else:
     st.markdown(
@@ -329,12 +323,11 @@ else:
 - Returns **BPM (tempo)** + **Key** + **Mode** + **Camelot**
 
 **Upgrades included**
-- **Missing BPM/Key stats** (percent + counts)
-- **Rate-limit safe** retry/backoff (handles 429 + transient 5xx)
-- **Caching** (re-runs are instant for the same playlist; cache TTL 30 minutes)
+- Missing BPM/Key stats (percent + counts)
+- Rate-limit safe retry/backoff (handles 429 + transient 5xx)
+- Caching keyed by (playlist, max_tracks, user_id) so reruns are instant
 
 **Notes**
 - Some tracks may show `N/A` if Spotify has no audio features (local/unavailable tracks).
-- If you change a playlist and need fresh results immediately, use “Cache controls” → clear cache.
         """
     )
