@@ -27,10 +27,13 @@ def _hide_pages_nav():
     )
 
 def bootstrap_page():
-    auth_manager = get_auth_manager()
-    handle_spotify_callback(auth_manager)
+    auth_manager = None
+    try:
+        auth_manager = get_auth_manager()
+        handle_spotify_callback(auth_manager)
+    except Exception as e:
+        st.session_state["_spotify_boot_error"] = str(e)
 
-    # If not logged in, hide Pages nav *before* rendering sidebar/UI
     if not is_logged_in():
         _hide_pages_nav()
 
@@ -40,6 +43,7 @@ def bootstrap_page():
         ok = show_login_form()
         if not ok:
             st.stop()
+
 
 
 def render_sidebar(auth_manager=None):
