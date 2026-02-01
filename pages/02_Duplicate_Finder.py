@@ -7,7 +7,7 @@ from afexcloud.utils import get_playlist_metadata
 
 bootstrap_page()
 
-st.title("🔍 Duplicate Finder")
+st.title(f"🔍 Duplicate Finder: {st.session_state.get('global_proj','')}")
 url = st.text_input("Enter Playlist URL/ID:")
 
 if st.button("Scan"):
@@ -16,12 +16,14 @@ if st.button("Scan"):
         client_id=st.secrets["SPOTIFY_CLIENT_ID"],
         client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"],
     )
+
     if not tracks:
         st.warning("No tracks found (check playlist ID/URL).")
     else:
         by_id = defaultdict(list)
         for t in tracks:
             by_id[t["Spotify - id"]].append(t)
+
         dupes = [i for g in by_id.values() if len(g) > 1 for i in g]
 
         if dupes:
@@ -38,4 +40,3 @@ if st.button("Scan"):
             )
         else:
             st.success("No duplicates found!")
-
