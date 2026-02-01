@@ -13,10 +13,28 @@ from afexcloud.layout import bootstrap_page
 bootstrap_page()
 
 # -----------------------------
-# Helpers
+# Constants / mappings
+# -----------------------------
+
+KEY_MAP = {
+    0: "C",  1: "C#", 2: "D",  3: "D#", 4: "E",  5: "F",
+    6: "F#", 7: "G",  8: "G#", 9: "A", 10: "A#", 11: "B"
+}
+
+# Camelot mapping (major = B, minor = A)
+CAMELOT_MAJOR = {"C":"8B","C#":"3B","D":"10B","D#":"5B","E":"12B","F":"7B","F#":"2B","G":"9B","G#":"4B","A":"11B","A#":"6B","B":"1B"}
+CAMELOT_MINOR = {"C":"5A","C#":"12A","D":"7A","D#":"2A","E":"9A","F":"4A","F#":"11A","G":"6A","G#":"1A","A":"8A","A#":"3A","B":"10A"}
+
+# Cache TTL (seconds). 1800 = 30 min.
+CACHE_TTL_SECONDS = 1800
+
+
+# -----------------------------
+# Utility helpers
 # -----------------------------
 
 def extract_playlist_id(playlist_input: str) -> str | None:
+    """Extract playlist ID from a Spotify playlist URL or raw ID."""
     if not playlist_input:
         return None
     playlist_input = playlist_input.strip()
@@ -25,20 +43,15 @@ def extract_playlist_id(playlist_input: str) -> str | None:
     if m:
         return m.group(1)
 
+    # Raw ID (Spotify playlist IDs are typically 22 chars)
     if len(playlist_input) == 22 and playlist_input.isalnum():
         return playlist_input
 
     return None
 
 
-KEY_MAP = {
-    0: "C",  1: "C#", 2: "D",  3: "D#", 4: "E",  5: "F",
-    6: "F#", 7: "G",  8: "G#", 9: "A", 10: "A#", 11: "B"
-}
-CAMELOT_MAJOR = {"C":"8B","C#":"3B","D":"10B","D#":"5B","E":"12B","F":"7B","F#":"2B","G":"9B","G#":"4B","A":"11B","A#":"6B","B":"1B"}
-CAMELOT_MINOR = {"C":"5A","C#":"12A","D":"7A","D#":"2A","E":"9A","F":"4A","F#":"11A","G":"6A","G#":"1A","A":"8A","A#":"3A","B":"10A"}
-
 def to_camelot(key_name: str | None, mode: int | None) -> str:
+    """mode: 1 = major, 0 = minor"""
     if not key_name or mode is None:
         return "N/A"
     if mode == 1:
@@ -49,18 +62,21 @@ def to_camelot(key_name: str | None, mode: int | None) -> str:
 
 
 def get_access_token_from_session() -> str | None:
+    """
+    Uses the user token created by your sidebar "Connect Spotify" flow.
+    """
     token_info = st.session_state.get("_spotify_token_info")
     if not token_info or not token_info.get("access_token"):
         return None
     return token_info["access_token"]
 
 
-def spotify_call(func, *args, max_retries: int = 6, base_sleep: float = 0.8, **kwargs):
+def spotify_call(func, *args, max_retries: int = 7, base_sleep: float = 0.8, **kwargs):
     """
-    Retry wrapper for Spotify calls:
-    - 429: retry-after / backoff
-    - 5xx: backoff
-    - 401: token expired/invalid -> raise immediately (user must reconnect)
+    Retry wrapper for Spotify calls.
+    - 429: waits Retry-After (if present) or exponential backoff + jitter
+    - 5xx: exponential backoff + jitter
+    - 401: token expired/invalid -> raise immediately (caller should tell user to reconnect)
     """
     attempt = 0
     while True:
@@ -71,29 +87,33 @@ def spotify_call(func, *args, max_retries: int = 6, base_sleep: float = 0.8, **k
             attempt += 1
             status = getattr(e, "http_status", None)
 
-            # Token expired/invalid
+            # Token invalid/expired
             if status == 401:
                 raise
 
             if attempt > max_retries:
                 raise
 
+            # Rate limit
             if status == 429:
                 retry_after = None
                 try:
                     retry_after = int((e.headers or {}).get("Retry-After", "0"))
                 except Exception:
                     retry_after = None
+
                 sleep_s = retry_after if (retry_after and retry_after > 0) else (base_sleep * (2 ** (attempt - 1)))
                 sleep_s += random.uniform(0, 0.35)
                 time.sleep(min(sleep_s, 30))
                 continue
 
+            # Transient server errors
             if status in (500, 502, 503, 504):
                 sleep_s = base_sleep * (2 ** (attempt - 1)) + random.uniform(0, 0.35)
                 time.sleep(min(sleep_s, 20))
                 continue
 
+            # Other errors bubble up
             raise
 
         except Exception:
@@ -102,6 +122,43 @@ def spotify_call(func, *args, max_retries: int = 6, base_sleep: float = 0.8, **k
                 raise
             sleep_s = base_sleep * (2 ** (attempt - 1)) + random.uniform(0, 0.35)
             time.sleep(min(sleep_s, 20))
+
+
+def fetch_audio_features_safe(sp: spotipy.Spotify, track_ids: list[str]) -> dict[str, dict | None]:
+    """
+    Fetch audio features robustly.
+    If Spotify throws 403/400 for a batch, split and retry to isolate bad IDs.
+    Bad IDs are set to None so the analysis completes instead of failing.
+    """
+    feats_by_id: dict[str, dict | None] = {}
+
+    def helper(chunk: list[str]):
+        if not chunk:
+            return
+        try:
+            feats = spotify_call(sp.audio_features, chunk)
+            for tid, f in zip(chunk, feats):
+                feats_by_id[tid] = f
+        except SpotifyException as e:
+            status = getattr(e, "http_status", None)
+
+            # If the whole chunk fails due to forbidden/bad request,
+            # split until we find the offending track(s).
+            if status in (400, 403) and len(chunk) > 1:
+                mid = len(chunk) // 2
+                helper(chunk[:mid])
+                helper(chunk[mid:])
+                return
+
+            # If a single ID still fails, mark it missing.
+            for tid in chunk:
+                feats_by_id[tid] = None
+
+    # API supports up to 100 IDs per call; helper splits further if needed.
+    for i in range(0, len(track_ids), 100):
+        helper(track_ids[i:i + 100])
+
+    return feats_by_id
 
 
 def show_missing_summary(df: pd.DataFrame):
@@ -120,27 +177,29 @@ def show_missing_summary(df: pd.DataFrame):
     c4.metric("Missing Both", f"{missing_both} ({missing_both/total:.0%})")
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def analyze_playlist_cached(playlist_id: str, max_tracks: int, user_cache_key: str) -> tuple[dict, pd.DataFrame]:
+# -----------------------------
+# Cached analyzer
+# -----------------------------
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def analyze_playlist_cached(
+    playlist_id: str,
+    max_tracks: int,
+    user_cache_key: str,
+    access_token: str,
+) -> tuple[dict, pd.DataFrame]:
     """
-    Cached analyzer keyed by:
+    Cached analyzer.
+    Cache key includes:
       - playlist_id
       - max_tracks
-      - spotify user id (user_cache_key)
-
-    Token is pulled from session at runtime (so we don't destroy caching each time token rotates).
+      - user_cache_key (Spotify user id)
+      - access_token (keeps behavior correct for private playlists; token rotation may reduce cache hits)
     """
-    access_token = get_access_token_from_session()
-    if not access_token:
-        # If cached call runs without token, just return empty;
-        # UI will prompt connect/reconnect.
-        return {}, pd.DataFrame()
-
     sp = spotipy.Spotify(auth=access_token)
 
     pl = spotify_call(sp.playlist, playlist_id, fields="name,owner(display_name),tracks.total")
     total = pl["tracks"]["total"]
-    target_total = total if (max_tracks <= 0) else min(total, max_tracks)
+    target_total = total if max_tracks <= 0 else min(total, max_tracks)
 
     # Fetch tracks
     items = []
@@ -153,12 +212,19 @@ def analyze_playlist_cached(playlist_id: str, max_tracks: int, user_cache_key: s
             playlist_id,
             limit=min(limit, target_total - offset),
             offset=offset,
-            fields="items(track(id,name,artists(name),album(name),duration_ms,popularity,explicit)),next,total",
+            # include type + is_local so we can filter properly
+            fields="items(track(id,type,is_local,name,artists(name),album(name),duration_ms,popularity,explicit)),next,total",
         )
 
         for it in batch.get("items", []):
             tr = it.get("track")
             if not tr or not tr.get("id"):
+                continue
+
+            # IMPORTANT: filter to real Spotify tracks only (avoids 403s)
+            if tr.get("type") != "track":
+                continue
+            if tr.get("is_local"):
                 continue
 
             artists = ", ".join([a["name"] for a in tr.get("artists", []) if a.get("name")])
@@ -182,13 +248,10 @@ def analyze_playlist_cached(playlist_id: str, max_tracks: int, user_cache_key: s
 
     track_ids = [t["track_id"] for t in items]
 
-    feats_by_id = {}
-    for i in range(0, len(track_ids), 100):
-        chunk = track_ids[i:i + 100]
-        feats = spotify_call(sp.audio_features, chunk)
-        for tid, f in zip(chunk, feats):
-            feats_by_id[tid] = f
+    # Fetch audio features robustly (403-safe)
+    feats_by_id = fetch_audio_features_safe(sp, track_ids)
 
+    # Build rows
     rows = []
     for t in items:
         f = feats_by_id.get(t["track_id"]) or {}
@@ -209,6 +272,7 @@ def analyze_playlist_cached(playlist_id: str, max_tracks: int, user_cache_key: s
             "key": key_name or "N/A",
             "mode": "major" if mode == 1 else ("minor" if mode == 0 else "N/A"),
             "camelot": camelot,
+            # extra DJ-friendly attributes
             "danceability": f.get("danceability", None),
             "energy": f.get("energy", None),
             "valence": f.get("valence", None),
@@ -218,7 +282,8 @@ def analyze_playlist_cached(playlist_id: str, max_tracks: int, user_cache_key: s
             "track_id": t["track_id"],
         })
 
-    return pl, pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    return pl, df
 
 
 # -----------------------------
@@ -233,16 +298,17 @@ if access_token is None:
     st.warning("Connect Spotify first using the sidebar button.")
     st.stop()
 
-# Create a client to get user id (for safe multi-user caching)
-sp = spotipy.Spotify(auth=access_token)
+# Determine user cache key (multi-user safe)
+sp_me = spotipy.Spotify(auth=access_token)
 try:
-    me = spotify_call(sp.current_user)
+    me = spotify_call(sp_me.current_user)
     user_cache_key = me.get("id", "unknown_user")
 except SpotifyException as e:
     if getattr(e, "http_status", None) == 401:
-        st.error("Your Spotify session expired. Please click **Disconnect Spotify** then **Connect Spotify** in the sidebar.")
+        st.error("Your Spotify session expired. Please **Disconnect Spotify** then **Connect Spotify** in the sidebar.")
         st.stop()
     raise
+
 
 option = st.radio(
     "Options (beta)",
@@ -250,26 +316,27 @@ option = st.radio(
     index=0
 )
 
+
 def run_analysis(playlist_input: str, max_tracks: int):
     playlist_id = extract_playlist_id(playlist_input)
     if not playlist_id:
         st.error("Invalid playlist URL or ID.")
         return
 
-    with st.spinner("Analyzing playlist (cached + rate-limit safe)…"):
+    with st.spinner("Analyzing playlist (cached + rate-limit safe + 403-safe)…"):
         try:
-            pl_info, df = analyze_playlist_cached(playlist_id, int(max_tracks), user_cache_key)
+            pl_info, df = analyze_playlist_cached(playlist_id, int(max_tracks), user_cache_key, access_token)
         except SpotifyException as e:
             status = getattr(e, "http_status", None)
             if status == 401:
-                st.error("Spotify token expired while analyzing. Please **Disconnect Spotify** then **Connect Spotify** in the sidebar, then retry.")
+                st.error("Spotify token expired. Please **Disconnect Spotify** then **Connect Spotify** in the sidebar, then retry.")
                 return
-            st.error("Spotify returned an error while fetching audio features.")
+            st.error("Spotify returned an error while analyzing.")
             st.caption(f"HTTP status: {status}")
             return
 
     if df is None or df.empty:
-        st.warning("No playable tracks found (or access denied).")
+        st.warning("No playable Spotify tracks found (or access denied).")
         return
 
     pl_name = (pl_info or {}).get("name", "Playlist")
@@ -277,7 +344,6 @@ def run_analysis(playlist_input: str, max_tracks: int):
     st.subheader(f"🎵 {pl_name} — {owner}".strip(" —"))
 
     show_missing_summary(df)
-
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     safe_proj = st.session_state.get("_safe_proj", "project")
@@ -316,18 +382,19 @@ elif option.startswith("2"):
 
 else:
     st.markdown(
-        """
+        f"""
 **What this does**
 - Pulls playlist tracks with Spotify API
 - Fetches **Audio Features** for each track
 - Returns **BPM (tempo)** + **Key** + **Mode** + **Camelot**
 
 **Upgrades included**
-- Missing BPM/Key stats (percent + counts)
-- Rate-limit safe retry/backoff (handles 429 + transient 5xx)
-- Caching keyed by (playlist, max_tracks, user_id) so reruns are instant
-
-**Notes**
-- Some tracks may show `N/A` if Spotify has no audio features (local/unavailable tracks).
+- **Missing BPM/Key stats** (percent + counts)
+- **Rate-limit safe** retry/backoff (429 + transient 5xx)
+- **Caching** (TTL {CACHE_TTL_SECONDS//60} minutes; reruns are fast)
+- **403-safe audio features fetching**:
+  - Filters out local/non-track items
+  - Splits failing batches to isolate “bad” IDs
+  - Marks bad tracks as N/A instead of failing the whole run
         """
     )
