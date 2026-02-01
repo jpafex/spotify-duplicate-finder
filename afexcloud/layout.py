@@ -1,6 +1,8 @@
 import re
 import streamlit as st
+import unicodedata
 
+# Note: Assumes you have an afexcloud/config.py with APP_VERSION = "3.1.0"
 from .config import APP_VERSION
 from .auth import is_logged_in, show_login_form, logout
 from .spotify_auth import (
@@ -11,15 +13,10 @@ from .spotify_auth import (
 )
 
 def _hide_pages_nav():
-    """
-    Hide Streamlit's built-in multipage navigation list in the sidebar.
-    Streamlit generates that list automatically from /pages.
-    This CSS hides it visually (best-effort).
-    """
+    """Hides Streamlit's default navigation to keep our custom look."""
     st.markdown(
         """
         <style>
-        /* Hide the built-in multipage navigation (Pages list) */
         section[data-testid="stSidebar"] nav { display: none !important; }
         </style>
         """,
@@ -27,15 +24,9 @@ def _hide_pages_nav():
     )
 
 def bootstrap_page():
-    """
-    Call at the TOP of every page (and app.py).
-
-    Beta flow:
-    1) Process Spotify callback first (so token exchange works even if login is shown)
-    2) Render sidebar (so Connect Spotify button always exists)
-    3) If not logged in: hide the Pages list, show login form, stop page content
-    """
-    # Best-effort: try to process Spotify callback, but don't crash the app if it fails
+    """The 'Look and Feel' Engine of AfexCloud."""
+    _hide_pages_nav()
+    
     auth_manager = None
     spotify_boot_error = None
     try:
@@ -44,86 +35,61 @@ def bootstrap_page():
     except Exception as e:
         spotify_boot_error = str(e)
 
-    # If not logged in, hide the Streamlit Pages nav BEFORE rendering sidebar/login
-    if not is_logged_in():
-        _hide_pages_nav()
-
-    # Always render sidebar (even pre-login) so user can see Spotify status/connect
-    render_sidebar(auth_manager=auth_manager, spotify_boot_error=spotify_boot_error)
-
-    # Gate page content
-    if not is_logged_in():
-        ok = show_login_form()
-        if not ok:
-            st.stop()
-
-def render_sidebar(auth_manager=None, spotify_boot_error: str | None = None):
-    token_info = None
-
-    # If auth_manager exists, attempt to validate token, but do not crash on errors
-    if auth_manager is not None:
-        try:
-            token_info = get_valid_token_info(auth_manager)
-        except Exception as e:
-            spotify_boot_error = spotify_boot_error or str(e)
-            token_info = None
-
-    if "global_proj" not in st.session_state:
-        st.session_state["global_proj"] = ""
+    token_info = get_valid_token_info(auth_manager)
 
     with st.sidebar:
-        st.write("")  # small spacer
-        st.subheader("☁️ AfexCloud")
-        st.caption(f"v{APP_VERSION}")
+        # 1. Restoration of the Brand Header
+        st.title("☁️ AfexCloud")
         st.write("---")
 
-        # Project field
+        # 2. Restoration of the Global Project Name Input
+        if "global_proj" not in st.session_state:
+            st.session_state["global_proj"] = ""
+        
         st.session_state["global_proj"] = st.text_input(
-            "📁 Global Project:",
-            value=st.session_state["global_proj"],
+            "📁 Global Project:", value=st.session_state["global_proj"]
         )
+        
         if st.button("🔄 Reset Project"):
             st.session_state["global_proj"] = ""
             st.rerun()
-
+            
         st.write("---")
 
-        # Spotify status + connect/disconnect
+        # 3. Restoration of Spotify Connection Status
         if spotify_boot_error:
-            st.warning("Spotify auth is unavailable right now.")
-            st.caption(f"Details: {spotify_boot_error}")
+            st.warning("Spotify auth is unavailable.")
         else:
             if token_info:
                 st.success("🟢 Spotify: Connected")
-                if st.button("🔌 Disconnect Spotify"):
-                    if auth_manager is not None:
-                        auth_manager.cache_handler.delete_cached_token()
-                    st.rerun()
             else:
                 st.error("🔴 Spotify: Not Connected")
-                if auth_manager is not None:
-                    auth_url = get_connect_url(auth_manager)
-                    try:
-                        st.link_button("Connect Spotify", auth_url)
-                    except Exception:
-                        st.markdown(f"[Connect Spotify]({auth_url})")
-                else:
-                    st.caption("Spotify connection is not initialized.")
+                auth_url = get_connect_url(auth_manager)
+                st.markdown(f"[Connect Spotify]({auth_url})")
 
         st.write("---")
 
-        # Logout
+        # 4. Restoration of Tool Navigation (with Icons)
+        # In a Multi-Page app, we use links to the actual filenames in your /pages folder
+        st.write("**Select a Tool:**")
+        st.page_link("app.py", label="🏠 Home")
+        st.page_link("pages/duplicate_finder.py", label="🔍 Duplicate Finder")
+        st.page_link("pages/song_lister.py", label="📋 Song Lister")
+        st.page_link("pages/batch_manager.py", label="📦 Batch Manager")
+        st.page_link("pages/playlist_deleter.py", label="🗑️ Playlist Deleter")
+        st.page_link("pages/sidecar_scraper.py", label="🕵️ Sidecar Scraper")
+
+        st.write("---")
         if st.button("🚪 Log Out"):
             logout()
-            if auth_manager is not None:
-                try:
-                    auth_manager.cache_handler.delete_cached_token()
-                except Exception:
-                    pass
             st.rerun()
+        
+        # 5. The Footer
+        st.caption(f"AfexCloud v{APP_VERSION} | Project: {st.session_state['global_proj'] if st.session_state['global_proj'] else 'Default'}")
 
-    # Handy “globals” pages can use
-    st.session_state["_spotify_token_info"] = token_info
-    st.session_state["_safe_proj"] = re.sub(
-        r"[^a-zA-Z0-9_]", "_", st.session_state["global_proj"]
-    )
+    # Secure the page
+    if not is_logged_in():
+        show_login_form()
+        st.stop()
+
+    return auth_manager, token_info
