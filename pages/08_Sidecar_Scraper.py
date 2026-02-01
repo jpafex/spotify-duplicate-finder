@@ -12,46 +12,32 @@ from afexcloud.layout import bootstrap_page
 
 bootstrap_page()
 
-# -----------------------------
-# Constants / mappings
-# -----------------------------
+# Bump this any time you change logic to automatically bust Streamlit cache keys.
+SIDECAR_CODE_VERSION = "1.0.0"
 
 KEY_MAP = {
     0: "C",  1: "C#", 2: "D",  3: "D#", 4: "E",  5: "F",
     6: "F#", 7: "G",  8: "G#", 9: "A", 10: "A#", 11: "B"
 }
-
-# Camelot mapping (major = B, minor = A)
 CAMELOT_MAJOR = {"C":"8B","C#":"3B","D":"10B","D#":"5B","E":"12B","F":"7B","F#":"2B","G":"9B","G#":"4B","A":"11B","A#":"6B","B":"1B"}
 CAMELOT_MINOR = {"C":"5A","C#":"12A","D":"7A","D#":"2A","E":"9A","F":"4A","F#":"11A","G":"6A","G#":"1A","A":"8A","A#":"3A","B":"10A"}
 
-# Cache TTL (seconds). 1800 = 30 min.
-CACHE_TTL_SECONDS = 1800
+CACHE_TTL_SECONDS = 1800  # 30 min
 
-
-# -----------------------------
-# Utility helpers
-# -----------------------------
 
 def extract_playlist_id(playlist_input: str) -> str | None:
-    """Extract playlist ID from a Spotify playlist URL or raw ID."""
     if not playlist_input:
         return None
     playlist_input = playlist_input.strip()
-
     m = re.search(r"open\.spotify\.com/playlist/([a-zA-Z0-9]+)", playlist_input)
     if m:
         return m.group(1)
-
-    # Raw ID (Spotify playlist IDs are typically 22 chars)
     if len(playlist_input) == 22 and playlist_input.isalnum():
         return playlist_input
-
     return None
 
 
 def to_camelot(key_name: str | None, mode: int | None) -> str:
-    """mode: 1 = major, 0 = minor"""
     if not key_name or mode is None:
         return "N/A"
     if mode == 1:
@@ -62,9 +48,6 @@ def to_camelot(key_name: str | None, mode: int | None) -> str:
 
 
 def get_access_token_from_session() -> str | None:
-    """
-    Uses the user token created by your sidebar "Connect Spotify" flow.
-    """
     token_info = st.session_state.get("_spotify_token_info")
     if not token_info or not token_info.get("access_token"):
         return None
@@ -72,12 +55,6 @@ def get_access_token_from_session() -> str | None:
 
 
 def spotify_call(func, *args, max_retries: int = 7, base_sleep: float = 0.8, **kwargs):
-    """
-    Retry wrapper for Spotify calls.
-    - 429: waits Retry-After (if present) or exponential backoff + jitter
-    - 5xx: exponential backoff + jitter
-    - 401: token expired/invalid -> raise immediately (caller should tell user to reconnect)
-    """
     attempt = 0
     while True:
         try:
@@ -87,33 +64,28 @@ def spotify_call(func, *args, max_retries: int = 7, base_sleep: float = 0.8, **k
             attempt += 1
             status = getattr(e, "http_status", None)
 
-            # Token invalid/expired
             if status == 401:
                 raise
 
             if attempt > max_retries:
                 raise
 
-            # Rate limit
             if status == 429:
                 retry_after = None
                 try:
                     retry_after = int((e.headers or {}).get("Retry-After", "0"))
                 except Exception:
                     retry_after = None
-
                 sleep_s = retry_after if (retry_after and retry_after > 0) else (base_sleep * (2 ** (attempt - 1)))
                 sleep_s += random.uniform(0, 0.35)
                 time.sleep(min(sleep_s, 30))
                 continue
 
-            # Transient server errors
             if status in (500, 502, 503, 504):
                 sleep_s = base_sleep * (2 ** (attempt - 1)) + random.uniform(0, 0.35)
                 time.sleep(min(sleep_s, 20))
                 continue
 
-            # Other errors bubble up
             raise
 
         except Exception:
@@ -125,11 +97,6 @@ def spotify_call(func, *args, max_retries: int = 7, base_sleep: float = 0.8, **k
 
 
 def fetch_audio_features_safe(sp: spotipy.Spotify, track_ids: list[str]) -> dict[str, dict | None]:
-    """
-    Fetch audio features robustly.
-    If Spotify throws 403/400 for a batch, split and retry to isolate bad IDs.
-    Bad IDs are set to None so the analysis completes instead of failing.
-    """
     feats_by_id: dict[str, dict | None] = {}
 
     def helper(chunk: list[str]):
@@ -141,20 +108,14 @@ def fetch_audio_features_safe(sp: spotipy.Spotify, track_ids: list[str]) -> dict
                 feats_by_id[tid] = f
         except SpotifyException as e:
             status = getattr(e, "http_status", None)
-
-            # If the whole chunk fails due to forbidden/bad request,
-            # split until we find the offending track(s).
             if status in (400, 403) and len(chunk) > 1:
                 mid = len(chunk) // 2
                 helper(chunk[:mid])
                 helper(chunk[mid:])
                 return
-
-            # If a single ID still fails, mark it missing.
             for tid in chunk:
                 feats_by_id[tid] = None
 
-    # API supports up to 100 IDs per call; helper splits further if needed.
     for i in range(0, len(track_ids), 100):
         helper(track_ids[i:i + 100])
 
@@ -164,7 +125,6 @@ def fetch_audio_features_safe(sp: spotipy.Spotify, track_ids: list[str]) -> dict
 def show_missing_summary(df: pd.DataFrame):
     if df is None or df.empty:
         return
-
     total = len(df)
     missing_bpm = df["bpm"].isna().sum()
     missing_key = (df["key"] == "N/A").sum()
@@ -177,23 +137,17 @@ def show_missing_summary(df: pd.DataFrame):
     c4.metric("Missing Both", f"{missing_both} ({missing_both/total:.0%})")
 
 
-# -----------------------------
-# Cached analyzer
-# -----------------------------
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def analyze_playlist_cached(
     playlist_id: str,
     max_tracks: int,
     user_cache_key: str,
     access_token: str,
-) -> tuple[dict, pd.DataFrame]:
+    code_version: str,
+) -> tuple[dict, pd.DataFrame, dict]:
     """
-    Cached analyzer.
-    Cache key includes:
-      - playlist_id
-      - max_tracks
-      - user_cache_key (Spotify user id)
-      - access_token (keeps behavior correct for private playlists; token rotation may reduce cache hits)
+    Returns: (playlist_info, dataframe, diagnostics)
+    diagnostics helps explain "no results".
     """
     sp = spotipy.Spotify(auth=access_token)
 
@@ -201,7 +155,17 @@ def analyze_playlist_cached(
     total = pl["tracks"]["total"]
     target_total = total if max_tracks <= 0 else min(total, max_tracks)
 
-    # Fetch tracks
+    diagnostics = {
+        "playlist_total_tracks": total,
+        "target_total_tracks": target_total,
+        "raw_items_seen": 0,
+        "skipped_missing_track": 0,
+        "skipped_missing_id": 0,
+        "skipped_local": 0,
+        "skipped_non_track_type": 0,
+        "kept_tracks": 0,
+    }
+
     items = []
     offset = 0
     limit = 100
@@ -212,25 +176,39 @@ def analyze_playlist_cached(
             playlist_id,
             limit=min(limit, target_total - offset),
             offset=offset,
-            # include type + is_local so we can filter properly
+            # include type + is_local, but we will be tolerant if they are missing
             fields="items(track(id,type,is_local,name,artists(name),album(name),duration_ms,popularity,explicit)),next,total",
         )
 
         for it in batch.get("items", []):
+            diagnostics["raw_items_seen"] += 1
+
             tr = it.get("track")
-            if not tr or not tr.get("id"):
+            if not tr:
+                diagnostics["skipped_missing_track"] += 1
                 continue
 
-            # IMPORTANT: filter to real Spotify tracks only (avoids 403s)
-            if tr.get("type") != "track":
+            tid = tr.get("id")
+            if not tid:
+                diagnostics["skipped_missing_id"] += 1
                 continue
-            if tr.get("is_local"):
+
+            # Tolerant defaults (IMPORTANT)
+            ttype = tr.get("type", "track")         # if missing, assume track
+            is_local = bool(tr.get("is_local", False))  # if missing, assume not local
+
+            if ttype != "track":
+                diagnostics["skipped_non_track_type"] += 1
+                continue
+            if is_local:
+                diagnostics["skipped_local"] += 1
                 continue
 
             artists = ", ".join([a["name"] for a in tr.get("artists", []) if a.get("name")])
+
             items.append({
                 "position": len(items) + 1,
-                "track_id": tr["id"],
+                "track_id": tid,
                 "track_name": tr.get("name", ""),
                 "artists": artists,
                 "album": (tr.get("album") or {}).get("name", ""),
@@ -243,19 +221,17 @@ def analyze_playlist_cached(
         if not batch.get("next"):
             break
 
+    diagnostics["kept_tracks"] = len(items)
+
     if not items:
-        return pl, pd.DataFrame()
+        return pl, pd.DataFrame(), diagnostics
 
     track_ids = [t["track_id"] for t in items]
-
-    # Fetch audio features robustly (403-safe)
     feats_by_id = fetch_audio_features_safe(sp, track_ids)
 
-    # Build rows
     rows = []
     for t in items:
         f = feats_by_id.get(t["track_id"]) or {}
-
         tempo = f.get("tempo", None)
         key_int = f.get("key", None)
         mode = f.get("mode", None)
@@ -272,7 +248,6 @@ def analyze_playlist_cached(
             "key": key_name or "N/A",
             "mode": "major" if mode == 1 else ("minor" if mode == 0 else "N/A"),
             "camelot": camelot,
-            # extra DJ-friendly attributes
             "danceability": f.get("danceability", None),
             "energy": f.get("energy", None),
             "valence": f.get("valence", None),
@@ -283,7 +258,7 @@ def analyze_playlist_cached(
         })
 
     df = pd.DataFrame(rows)
-    return pl, df
+    return pl, df, diagnostics
 
 
 # -----------------------------
@@ -291,14 +266,21 @@ def analyze_playlist_cached(
 # -----------------------------
 
 st.title("🕵️ Sidecar Musical Analyzer (Spotify Audio Features)")
-st.info("Uses Spotify Audio Features to return real BPM + Key (not scraping).")
+st.caption("BPM + Key + Camelot from Spotify Audio Features. Includes rate-limit safety + caching + diagnostics.")
+
+# Cache control ALWAYS visible (even when results empty)
+with st.expander("⚙️ Cache controls", expanded=False):
+    st.caption("If you previously tested a broken Sidecar version, clear cache to remove stale empty results.")
+    if st.button("Clear Sidecar cache now"):
+        st.cache_data.clear()
+        st.success("Cache cleared. Run analysis again.")
 
 access_token = get_access_token_from_session()
 if access_token is None:
     st.warning("Connect Spotify first using the sidebar button.")
     st.stop()
 
-# Determine user cache key (multi-user safe)
+# Get Spotify user id (for multi-user cache separation)
 sp_me = spotipy.Spotify(auth=access_token)
 try:
     me = spotify_call(sp_me.current_user)
@@ -308,7 +290,6 @@ except SpotifyException as e:
         st.error("Your Spotify session expired. Please **Disconnect Spotify** then **Connect Spotify** in the sidebar.")
         st.stop()
     raise
-
 
 option = st.radio(
     "Options (beta)",
@@ -325,7 +306,13 @@ def run_analysis(playlist_input: str, max_tracks: int):
 
     with st.spinner("Analyzing playlist (cached + rate-limit safe + 403-safe)…"):
         try:
-            pl_info, df = analyze_playlist_cached(playlist_id, int(max_tracks), user_cache_key, access_token)
+            pl_info, df, diag = analyze_playlist_cached(
+                playlist_id=playlist_id,
+                max_tracks=int(max_tracks),
+                user_cache_key=user_cache_key,
+                access_token=access_token,
+                code_version=SIDECAR_CODE_VERSION,
+            )
         except SpotifyException as e:
             status = getattr(e, "http_status", None)
             if status == 401:
@@ -335,13 +322,17 @@ def run_analysis(playlist_input: str, max_tracks: int):
             st.caption(f"HTTP status: {status}")
             return
 
-    if df is None or df.empty:
-        st.warning("No playable Spotify tracks found (or access denied).")
-        return
-
     pl_name = (pl_info or {}).get("name", "Playlist")
     owner = ((pl_info or {}).get("owner") or {}).get("display_name", "")
     st.subheader(f"🎵 {pl_name} — {owner}".strip(" —"))
+
+    # Diagnostics always visible
+    with st.expander("🔎 Diagnostics (why you might see no results)", expanded=False):
+        st.json(diag)
+
+    if df is None or df.empty:
+        st.warning("No playable Spotify tracks were kept after filtering (see Diagnostics).")
+        return
 
     show_missing_summary(df)
     st.dataframe(df, use_container_width=True, hide_index=True)
@@ -357,21 +348,16 @@ def run_analysis(playlist_input: str, max_tracks: int):
         "text/csv",
     )
 
-    with st.expander("⚙️ Cache controls"):
-        st.caption("If you update a playlist and want fresh results immediately, clear the cache.")
-        if st.button("Clear Sidecar cache now"):
-            st.cache_data.clear()
-            st.success("Cache cleared. Re-run analysis.")
-
 
 if option.startswith("1"):
-    playlist_input = st.text_input("Enter Spotify Playlist URL or ID:")
+    playlist_input = st.text_input("Enter Spotify Playlist URL or ID:", value="")
     max_tracks = st.number_input("Max tracks (0 = ALL)", min_value=0, value=0, step=10)
 
     if st.button("🚀 Analyze Playlist"):
         run_analysis(playlist_input, int(max_tracks))
 
 elif option.startswith("2"):
+    # Try a stable public playlist for quick validation
     test_url = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
     st.write("Example playlist URL:")
     playlist_input = st.text_input("Test playlist URL/ID", value=test_url)
@@ -384,17 +370,14 @@ else:
     st.markdown(
         f"""
 **What this does**
-- Pulls playlist tracks with Spotify API
-- Fetches **Audio Features** for each track
-- Returns **BPM (tempo)** + **Key** + **Mode** + **Camelot**
+- Reads playlist tracks via Spotify API
+- Calls Spotify **Audio Features** to get BPM/key
+- Outputs BPM + key + mode + Camelot + some DJ-friendly attributes
 
-**Upgrades included**
-- **Missing BPM/Key stats** (percent + counts)
-- **Rate-limit safe** retry/backoff (429 + transient 5xx)
-- **Caching** (TTL {CACHE_TTL_SECONDS//60} minutes; reruns are fast)
-- **403-safe audio features fetching**:
-  - Filters out local/non-track items
-  - Splits failing batches to isolate “bad” IDs
-  - Marks bad tracks as N/A instead of failing the whole run
+**Included upgrades**
+- Missing BPM/Key % summary
+- Rate-limit retry/backoff (429 + transient 5xx)
+- Caching (TTL {CACHE_TTL_SECONDS//60} minutes)
+- Diagnostics to explain “no results”
         """
     )
