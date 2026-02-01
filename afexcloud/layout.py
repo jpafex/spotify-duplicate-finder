@@ -27,30 +27,46 @@ def _hide_pages_nav():
     )
 
 def bootstrap_page():
+    """
+    Call at the TOP of every page (and app.py).
+
+    Beta flow:
+    1) Process Spotify callback first (so token exchange works even if login is shown)
+    2) Render sidebar (so Connect Spotify button always exists)
+    3) If not logged in: hide the Pages list, show login form, stop page content
+    """
+    # Best-effort: try to process Spotify callback, but don't crash the app if it fails
     auth_manager = None
+    spotify_boot_error = None
     try:
         auth_manager = get_auth_manager()
         handle_spotify_callback(auth_manager)
     except Exception as e:
-        st.session_state["_spotify_boot_error"] = str(e)
+        spotify_boot_error = str(e)
 
+    # If not logged in, hide the Streamlit Pages nav BEFORE rendering sidebar/login
     if not is_logged_in():
         _hide_pages_nav()
 
-    render_sidebar(auth_manager)
+    # Always render sidebar (even pre-login) so user can see Spotify status/connect
+    render_sidebar(auth_manager=auth_manager, spotify_boot_error=spotify_boot_error)
 
+    # Gate page content
     if not is_logged_in():
         ok = show_login_form()
         if not ok:
             st.stop()
 
+def render_sidebar(auth_manager=None, spotify_boot_error: str | None = None):
+    token_info = None
 
-
-def render_sidebar(auth_manager=None):
-    if auth_manager is None:
-        auth_manager = get_auth_manager()
-
-    token_info = get_valid_token_info(auth_manager)
+    # If auth_manager exists, attempt to validate token, but do not crash on errors
+    if auth_manager is not None:
+        try:
+            token_info = get_valid_token_info(auth_manager)
+        except Exception as e:
+            spotify_boot_error = spotify_boot_error or str(e)
+            token_info = None
 
     if "global_proj" not in st.session_state:
         st.session_state["global_proj"] = ""
@@ -73,25 +89,37 @@ def render_sidebar(auth_manager=None):
         st.write("---")
 
         # Spotify status + connect/disconnect
-        if token_info:
-            st.success("🟢 Spotify: Connected")
-            if st.button("🔌 Disconnect Spotify"):
-                auth_manager.cache_handler.delete_cached_token()
-                st.rerun()
+        if spotify_boot_error:
+            st.warning("Spotify auth is unavailable right now.")
+            st.caption(f"Details: {spotify_boot_error}")
         else:
-            st.error("🔴 Spotify: Not Connected")
-            auth_url = get_connect_url(auth_manager)
-            try:
-                st.link_button("Connect Spotify", auth_url)
-            except Exception:
-                st.markdown(f"[Connect Spotify]({auth_url})")
+            if token_info:
+                st.success("🟢 Spotify: Connected")
+                if st.button("🔌 Disconnect Spotify"):
+                    if auth_manager is not None:
+                        auth_manager.cache_handler.delete_cached_token()
+                    st.rerun()
+            else:
+                st.error("🔴 Spotify: Not Connected")
+                if auth_manager is not None:
+                    auth_url = get_connect_url(auth_manager)
+                    try:
+                        st.link_button("Connect Spotify", auth_url)
+                    except Exception:
+                        st.markdown(f"[Connect Spotify]({auth_url})")
+                else:
+                    st.caption("Spotify connection is not initialized.")
 
         st.write("---")
 
         # Logout
         if st.button("🚪 Log Out"):
             logout()
-            auth_manager.cache_handler.delete_cached_token()
+            if auth_manager is not None:
+                try:
+                    auth_manager.cache_handler.delete_cached_token()
+                except Exception:
+                    pass
             st.rerun()
 
     # Handy “globals” pages can use
