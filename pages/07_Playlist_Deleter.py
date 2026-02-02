@@ -29,7 +29,7 @@ else:
                 # DUAL FORMATTING: Adding both URI and Web URL
                 raw_id = p['id']
                 full_uri = f"spotify:playlist:{raw_id}"
-                web_url = f"https://open.spotify.com/playlist/"
+                web_url = f"https://open.spotify.com/playlist/{raw_id}"
                 
                 playlists.append({
                     "Delete?": False,
