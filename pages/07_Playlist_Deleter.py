@@ -13,7 +13,7 @@ auth_manager, token_info = bootstrap_page()
 
 # 3. Tool Logic
 st.title("🗑️ Playlist Deleter")
-st.info("Your Playlist IDs are now automatically formatted as 'Spotify URIs' for easier pasting into DJ software.")
+st.info("Dual Links Enabled: Use the URI for DJ software or the Web Link for your browser.")
 
 if not token_info:
     st.warning("Connect Spotify first via the sidebar to access your library.")
@@ -26,13 +26,16 @@ else:
             results = sp.current_user_playlists(limit=50)
             playlists = []
             for p in results['items']:
-                # AUTOMATIC URI CONVERSION: We add the prefix here as requested
-                full_uri = f"spotify:playlist:{p['id']}"
+                # DUAL FORMATTING: Adding both URI and Web URL
+                raw_id = p['id']
+                full_uri = f"spotify:playlist:{raw_id}"
+                web_url = f"https://open.spotify.com/playlist/"
                 
                 playlists.append({
                     "Delete?": False,
                     "Playlist Name": p['name'],
-                    "Spotify URI": full_uri,
+                    "Web Player Link": web_url, # Browser-friendly
+                    "Spotify URI": full_uri,    # App-friendly
                     "Tracks": p['tracks']['total'],
                     "Owner": p['owner']['display_name']
                 })
@@ -44,7 +47,7 @@ else:
 
         st.write("---")
         st.subheader("📋 Step 1: Pre-Deletion Inventory")
-        st.caption("Tip: You can highlight and copy (Ctrl+C) any URI directly from this table.")
+        st.caption("You can copy the Web Link for browsers or the URI for app-based workflows.")
 
         # Interactive Table for copying and selecting
         edited_df = st.data_editor(
@@ -53,17 +56,18 @@ else:
             use_container_width=True,
             column_config={
                 "Delete?": st.column_config.CheckboxColumn(help="Queue for deletion"),
-                "Spotify URI": st.column_config.TextColumn(help="Ready-to-use URI for DJ software"),
+                "Web Player Link": st.column_config.LinkColumn(help="Opens the browser player"),
+                "Spotify URI": st.column_config.TextColumn(help="Best for DJ apps"),
             },
-            disabled=["Playlist Name", "Spotify URI", "Tracks", "Owner"]
+            disabled=["Playlist Name", "Web Player Link", "Spotify URI", "Tracks", "Owner"]
         )
 
-        # Pre-Deletion Download
+        # Pre-Deletion Download (Contains both columns)
         csv_inventory = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download Current Inventory (CSV)",
             data=csv_inventory,
-            file_name=f"Playlist_Inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"Playlist_Audit_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
 
@@ -81,13 +85,14 @@ else:
                 
                 for _, row in to_del_df.iterrows():
                     try:
-                        # Extract the raw ID back out for the API call
+                        # Extract the raw ID from the URI column
                         raw_id = row["Spotify URI"].split(":")[-1]
                         sp.current_user_unfollow_playlist(raw_id)
                         
                         log_entries.append({
                             "Status": "Deleted",
                             "Name": row["Playlist Name"],
+                            "Web Link": row["Web Player Link"],
                             "URI": row["Spotify URI"],
                             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
@@ -109,4 +114,4 @@ else:
                 # Clear state to refresh on next load
                 del st.session_state["deleter_table"]
         else:
-            st.info("Check the 'Delete?' boxes above to begin.")
+            st.info("Check the 'Delete?' boxes above to enable the delete button.")
