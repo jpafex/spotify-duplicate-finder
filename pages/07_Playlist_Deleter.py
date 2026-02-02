@@ -35,9 +35,9 @@ else:
                     "Delete?": False,
                     "Playlist Name": p['name'],
                     "Web Player Link": web_url, # Browser-friendly
-                    "Spotify URI": full_uri,    # App-friendly
                     "Tracks": p['tracks']['total'],
-                    "Owner": p['owner']['display_name']
+                    "Owner": p['owner']['display_name'],
+                    "Spotify URI": full_uri  # Still stored but hidden
                 })
             st.session_state["deleter_table"] = pd.DataFrame(playlists)
 
@@ -47,7 +47,7 @@ else:
 
         st.write("---")
         st.subheader("📋 Step 1: Pre-Deletion Inventory")
-        st.caption("You can copy the Web Link for browsers or the URI for app-based workflows.")
+        st.caption("Select playlists to delete and copy their browser links.")
 
         # Interactive Table for copying and selecting
         edited_df = st.data_editor(
@@ -57,12 +57,12 @@ else:
             column_config={
                 "Delete?": st.column_config.CheckboxColumn(help="Queue for deletion"),
                 "Web Player Link": st.column_config.LinkColumn(help="Opens the browser player"),
-                "Spotify URI": st.column_config.TextColumn(help="Best for DJ apps"),
             },
-            disabled=["Playlist Name", "Web Player Link", "Spotify URI", "Tracks", "Owner"]
+            disabled=["Playlist Name", "Web Player Link", "Tracks", "Owner"],
+            column_order=["Delete?", "Playlist Name", "Web Player Link", "Tracks", "Owner"]
         )
 
-        # Pre-Deletion Download (Contains both columns)
+        # Pre-Deletion Download (Still contains both columns for reference)
         csv_inventory = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download Current Inventory (CSV)",
@@ -85,15 +85,15 @@ else:
                 
                 for _, row in to_del_df.iterrows():
                     try:
-                        # Extract the raw ID from the URI column
-                        raw_id = row["Spotify URI"].split(":")[-1]
+                        # Extract the raw ID from the web link
+                        # URL format: https://open.spotify.com/playlist/{raw_id}
+                        raw_id = row["Web Player Link"].split("/")[-1]
                         sp.current_user_unfollow_playlist(raw_id)
                         
                         log_entries.append({
                             "Status": "Deleted",
                             "Name": row["Playlist Name"],
                             "Web Link": row["Web Player Link"],
-                            "URI": row["Spotify URI"],
                             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
                         success_count += 1
