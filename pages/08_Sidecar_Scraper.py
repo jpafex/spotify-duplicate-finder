@@ -18,9 +18,12 @@ def get_isolated_token():
     url = "https://accounts.spotify.com/api/token"
     auth_str = f"{client_id}:{client_secret}"
     auth_b64 = base64.b64encode(auth_str.encode()).decode()
+    
+    # MIMICRY HEADERS: Making the cloud look like a local machine
     headers = {
         'Authorization': f'Basic {auth_b64}',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GitBash/2.43.0'
     }
     data = {'grant_type': 'client_credentials'}
     response = requests.post(url, headers=headers, data=data)
@@ -33,24 +36,28 @@ KEY_MAP = {
 }
 
 # --- TOOL INTERFACE ---
-st.title("🕵️ Sidecar Scraper (v3.6)")
-st.info("The 'Nutcracker' engine is active: Market-Locked to US and using Slow-Burn batching for maximum hits.")
+st.title("🕵️ Sidecar Scraper (v3.7)")
+st.info("Git-Bash Mimicry Active: Attempting to bypass Cloud restrictions using localized headers.")
 
 playlist_input = st.text_input("🔗 Spotify Playlist URL or ID:", placeholder="Paste link here...")
 
-if st.button("🚀 Crack the DNA"):
+if st.button("🚀 Mirror Bash Analysis"):
     if not playlist_input:
         st.warning("Please enter a playlist link.")
     else:
-        with st.spinner("Analyzing... (Using Market-Locking for Cloud Stability)"):
+        with st.spinner("Executing Git-Bash mimicry engine..."):
             token = get_isolated_token()
-            headers = {'Authorization': f'Bearer {token}'}
             
-            # Extract ID
+            # HEADERS: Added User-Agent to every request
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+            }
+            
             p_id = playlist_input.split('/')[-1].split('?')[0] if '/' in playlist_input else playlist_input
             
             try:
-                # 1. Fetch Tracks with Market=US
+                # 1. Fetch Tracks (Market-Locked for US stability)
                 all_items = []
                 url = f"https://api.spotify.com/v1/playlists/{p_id}/tracks?limit=100&market=US"
                 while url:
@@ -59,10 +66,10 @@ if st.button("🚀 Crack the DNA"):
                     url = res.get('next')
 
                 if not all_items:
-                    st.error("No tracks found. Is this playlist private?")
+                    st.error("Empty response. Check your Spotify Secrets.")
                 else:
                     dna_results = []
-                    # 2. Slow-Burn Batching (Groups of 20 for stability)
+                    # 2. Slow-Burn Batching (Groups of 20)
                     for i in range(0, len(all_items), 20):
                         batch = all_items[i:i+20]
                         valid_tracks = [t['track'] for t in batch if t.get('track') and t['track'].get('id')]
@@ -75,13 +82,13 @@ if st.button("🚀 Crack the DNA"):
                         feat_res = requests.get(feat_url, headers=headers).json()
                         features_list = feat_res.get('audio_features', [])
 
-                        # 4. Map DNA to Tracks (Bulletproof Mapping)
+                        # 4. Bulletproof Mapping
                         feat_map = {f['id']: f for f in features_list if f is not None}
                         
                         for track in valid_tracks:
                             f = feat_map.get(track['id'])
-                            
                             key_text, bpm = "N/A", 0
+                            
                             if f:
                                 k_name = KEY_MAP.get(f['key'], 'N/A')
                                 mode = "Major" if f['mode'] == 1 else "Minor"
@@ -97,24 +104,13 @@ if st.button("🚀 Crack the DNA"):
                             })
 
                     df = pd.DataFrame(dna_results)
-                    st.success(f"Analysis complete! Cracking successful for {len(df)} tracks.")
+                    st.success(f"Mimicry Complete! {len(df)} tracks analyzed.")
+                    st.data_editor(df, hide_index=True, use_container_width=True)
                     
-                    # Sort by BPM to help the Larks with their mix
-                    df = df.sort_values(by="BPM", ascending=True)
-
-                    st.data_editor(
-                        df,
-                        hide_index=True,
-                        use_container_width=True,
-                    )
-                    
-                    # Download for logs
-                    safe_proj = st.session_state.get("_safe_proj", "Project")
                     st.download_button(
                         "📥 Download Master DJ Log",
                         df.to_csv(index=False).encode('utf-8'),
-                        f"{safe_proj}_DNA_Log.csv",
-                        "text/csv"
+                        "DNA_Log.csv", "text/csv"
                     )
             except Exception as e:
-                st.error(f"The Nutcracker hit a wall: {e}")
+                st.error(f"Environmental Block Detected: {e}")
