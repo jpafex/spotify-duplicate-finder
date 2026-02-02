@@ -1,7 +1,8 @@
 import re
 import streamlit as st
+import os
 
-# Import your modular components
+from .config import APP_VERSION
 from .auth import is_logged_in, show_login_form, logout
 from .spotify_auth import (
     get_auth_manager,
@@ -10,8 +11,8 @@ from .spotify_auth import (
     get_connect_url,
 )
 
-def _hide_default_nav():
-    """Hides the default Streamlit pages list to restore custom styling."""
+def _hide_pages_nav():
+    """Hides the default Streamlit sidebar menu to use our custom one."""
     st.markdown(
         """
         <style>
@@ -22,15 +23,16 @@ def _hide_default_nav():
     )
 
 def bootstrap_page():
-    """Restores the AfexCloud brand identity and sidebar logic."""
-    _hide_default_nav()
+    """The central engine for AfexCloud branding, auth, and navigation."""
+    _hide_pages_nav()
     
     auth_manager = None
+    spotify_boot_error = None
     try:
         auth_manager = get_auth_manager()
         handle_spotify_callback(auth_manager)
     except Exception as e:
-        st.sidebar.error(f"Auth Error: {e}")
+        spotify_boot_error = str(e)
 
     token_info = get_valid_token_info(auth_manager)
 
@@ -38,7 +40,7 @@ def bootstrap_page():
         st.title("☁️ AfexCloud")
         st.write("---")
 
-        # Global Project Persistence
+        # 1. Project Management
         if "global_proj" not in st.session_state:
             st.session_state["global_proj"] = ""
         
@@ -46,27 +48,32 @@ def bootstrap_page():
             "📁 Global Project:", value=st.session_state["global_proj"]
         )
         
-        if st.button("🔄 Reset Project"):
+        # Unique key added to prevent DuplicateElementId error
+        if st.button("🔄 Reset Project Name", key="reset_proj_btn"):
             st.session_state["global_proj"] = ""
             st.rerun()
             
         st.write("---")
 
-        # Spotify Connection Status
-        if token_info:
-            st.success("🟢 Spotify: Connected")
+        # 2. Spotify Status
+        if spotify_boot_error:
+            st.warning("Spotify connection error.")
+            st.caption(f"Details: {spotify_boot_error}")
         else:
-            st.error("🔴 Spotify: Not Connected")
-            auth_url = get_connect_url(auth_manager)
-            st.markdown(f"[Connect Spotify]({auth_url})")
+            if token_info:
+                st.success("🟢 Spotify: Connected")
+            else:
+                st.error("🔴 Spotify: Not Connected")
+                auth_url = get_connect_url(auth_manager)
+                st.markdown(f"[Connect Spotify]({auth_url})")
 
         st.write("---")
 
-        # Custom Navigation (Matches your new folder structure)
+        # 3. Custom Navigation
         st.write("**Select a Tool:**")
         st.page_link("app.py", label="🏠 Home")
         
-        # Ensure these filenames exist in your /pages folder to avoid the error
+        # Tool Links - using a try/except to handle missing files gracefully
         try:
             st.page_link("pages/duplicate_finder.py", label="🔍 Duplicate Finder")
             st.page_link("pages/song_lister.py", label="📋 Song Lister")
@@ -74,40 +81,28 @@ def bootstrap_page():
             st.page_link("pages/playlist_deleter.py", label="🗑️ Playlist Deleter")
             st.page_link("pages/sidecar_scraper.py", label="🕵️ Sidecar Scraper")
         except Exception:
-            st.caption("⚠️ Some tool pages are missing in /pages folder.")
+            st.caption("⚠️ Note: Some tool files are not yet in the /pages folder.")
 
-      # ... your existing tool links are up here ...
-        except Exception:
-            st.caption("⚠️ Some tool pages are missing in /pages folder.")
-
-        # --- PASTE THIS TROUBLESHOOTING BLOCK HERE ---
+        # 4. Troubleshooting Section
         st.write("---")
         st.caption("🔧 Troubleshooting")
-        if st.button("🔄 Force Clear Spotify Cache"):
-            import os
-            cache_file = ".cache-token"
-            if os.path.exists(cache_file):
-                os.remove(cache_file)
-                st.success("Cache cleared! Reconnect to update permissions.")
+        if st.button("🔄 Force Clear Spotify Cache", key="force_cache_btn"):
+            if os.path.exists(".cache-token"):
+                os.remove(".cache-token")
+                st.success("Cache cleared! Please reconnect.")
             else:
                 st.info("No cache file found on server.")
-            
-            # Wipe session state to force a fresh 'Agree' handshake
             st.session_state.clear()
             st.rerun()
-        # ---------------------------------------------
 
+        # 5. Logout & Footer
         st.write("---")
-        if st.button("🚪 Log Out"):
-            logout()
-            st.rerun()  
-
-        st.write("---")
-        if st.button("🚪 Log Out"):
+        if st.button("🚪 Log Out", key="logout_btn"):
             logout()
             st.rerun()
         
-        st.caption(f"AfexCloud | Project: {st.session_state['global_proj'] if st.session_state['global_proj'] else 'Default'}")
+        proj_display = st.session_state['global_proj'] if st.session_state['global_proj'] else 'Default'
+        st.caption(f"AfexCloud v{APP_VERSION} | Project: {proj_display}")
 
     # Secure the page
     if not is_logged_in():
