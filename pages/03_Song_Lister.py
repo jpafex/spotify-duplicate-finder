@@ -20,38 +20,32 @@ if st.button("Generate Inventory"):
         # Create DataFrame from tracks
         df = pd.DataFrame(tracks)
         
-        # DEBUGGING: Show what columns we actually have
-        st.write(f"Debug: Available columns in tracks data: {list(df.columns)}")
-        
         # Add playlist name column
         df['Playlist'] = p_name
         
-        # Define base columns that should come first
-        base_columns = ['Original Pos', 'Name', 'Artist', 'Album']
+        # Define the first 5 columns (Playlist will be 5th)
+        first_columns = ['Original Pos', 'Name', 'Artist', 'Album', 'Playlist']
         
         # Get all columns from the DataFrame
         all_columns = list(df.columns)
         
-        # Remove base columns and special columns from the list
-        special_columns = ['Spotify-id', 'Playlist']
+        # Remove first columns and special columns from the list
+        special_columns = ['Spotify-id']
         columns_to_reorder = [col for col in all_columns 
-                            if col not in base_columns and col not in special_columns]
+                            if col not in first_columns and col not in special_columns]
         
         # Build the final column order
         final_columns = []
         
-        # Add base columns that actually exist
-        for col in base_columns:
+        # Add first columns that actually exist
+        for col in first_columns:
             if col in df.columns:
                 final_columns.append(col)
         
-        # Add other columns
+        # Add other columns (excluding first and special columns)
         final_columns.extend(columns_to_reorder)
         
-        # Add Playlist and Spotify-id at the end
-        if 'Playlist' in df.columns:
-            final_columns.append('Playlist')
-        
+        # Add Spotify-id at the very end
         if 'Spotify-id' in df.columns:
             final_columns.append('Spotify-id')
         
