@@ -76,6 +76,32 @@ def bootstrap_page():
         except Exception:
             st.caption("⚠️ Some tool pages are missing in /pages folder.")
 
+      # ... your existing tool links are up here ...
+        except Exception:
+            st.caption("⚠️ Some tool pages are missing in /pages folder.")
+
+        # --- PASTE THIS TROUBLESHOOTING BLOCK HERE ---
+        st.write("---")
+        st.caption("🔧 Troubleshooting")
+        if st.button("🔄 Force Clear Spotify Cache"):
+            import os
+            cache_file = ".cache-token"
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+                st.success("Cache cleared! Reconnect to update permissions.")
+            else:
+                st.info("No cache file found on server.")
+            
+            # Wipe session state to force a fresh 'Agree' handshake
+            st.session_state.clear()
+            st.rerun()
+        # ---------------------------------------------
+
+        st.write("---")
+        if st.button("🚪 Log Out"):
+            logout()
+            st.rerun()  
+
         st.write("---")
         if st.button("🚪 Log Out"):
             logout()
