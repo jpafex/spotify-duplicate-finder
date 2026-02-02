@@ -13,48 +13,49 @@ auth_manager, token_info = bootstrap_page()
 
 # 3. Tool Logic
 st.title("🗑️ Playlist Deleter")
-st.info("Review, copy, or download your playlist data before performing batch deletions.")
+st.info("Your Playlist IDs are now automatically formatted as 'Spotify URIs' for easier pasting into DJ software.")
 
 if not token_info:
     st.warning("Connect Spotify first via the sidebar to access your library.")
 else:
     sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    # Button to fetch fresh data from Spotify
+    # Button to fetch fresh data
     if st.button("🔍 Load My Playlists"):
         with st.spinner("Fetching library..."):
             results = sp.current_user_playlists(limit=50)
             playlists = []
             for p in results['items']:
+                # AUTOMATIC URI CONVERSION: We add the prefix here as requested
+                full_uri = f"spotify:playlist:{p['id']}"
+                
                 playlists.append({
                     "Delete?": False,
                     "Playlist Name": p['name'],
-                    "Spotify ID": p['id'],
+                    "Spotify URI": full_uri,
                     "Tracks": p['tracks']['total'],
                     "Owner": p['owner']['display_name']
                 })
             st.session_state["deleter_table"] = pd.DataFrame(playlists)
 
-    # If data is loaded, show the interactive tools
+    # Display Interactive Table
     if "deleter_table" in st.session_state and not st.session_state["deleter_table"].empty:
         df = st.session_state["deleter_table"]
 
         st.write("---")
         st.subheader("📋 Step 1: Pre-Deletion Inventory")
-        st.write("Use this table to copy specific IDs or segments. You can also download the full list for your records.")
+        st.caption("Tip: You can highlight and copy (Ctrl+C) any URI directly from this table.")
 
-        # The "Table of Sorts": Allows highlighting, copying, and sorting
-        # We use data_editor to allow the "Delete?" checkbox column
+        # Interactive Table for copying and selecting
         edited_df = st.data_editor(
             df,
             hide_index=True,
             use_container_width=True,
             column_config={
-                "Delete?": st.column_config.CheckboxColumn(help="Select to queue for deletion"),
-                "Spotify ID": st.column_config.TextColumn(help="Copy this ID for your logs"),
-                "Tracks": st.column_config.NumberColumn(format="%d")
+                "Delete?": st.column_config.CheckboxColumn(help="Queue for deletion"),
+                "Spotify URI": st.column_config.TextColumn(help="Ready-to-use URI for DJ software"),
             },
-            disabled=["Playlist Name", "Spotify ID", "Tracks", "Owner"] # Prevent accidental edits
+            disabled=["Playlist Name", "Spotify URI", "Tracks", "Owner"]
         )
 
         # Pre-Deletion Download
@@ -62,15 +63,13 @@ else:
         st.download_button(
             label="📥 Download Current Inventory (CSV)",
             data=csv_inventory,
-            file_name=f"Pre_Deletion_Inventory_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            help="Save this list before you delete anything."
+            file_name=f"Playlist_Inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
         )
 
         st.write("---")
         st.subheader("🔥 Step 2: Batch Deletion")
         
-        # Filter for rows where the user checked "Delete?"
         to_del_df = edited_df[edited_df["Delete?"] == True]
         
         if not to_del_df.empty:
@@ -82,29 +81,32 @@ else:
                 
                 for _, row in to_del_df.iterrows():
                     try:
-                        sp.current_user_unfollow_playlist(row["Spotify ID"])
+                        # Extract the raw ID back out for the API call
+                        raw_id = row["Spotify URI"].split(":")[-1]
+                        sp.current_user_unfollow_playlist(raw_id)
+                        
                         log_entries.append({
                             "Status": "Deleted",
                             "Name": row["Playlist Name"],
-                            "ID": row["Spotify ID"],
+                            "URI": row["Spotify URI"],
                             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         })
                         success_count += 1
                     except Exception as e:
-                        st.error(f"Error deleting {row['Playlist Name']}: {e}")
+                        st.error(f"Error: {e}")
 
-                st.success(f"Successfully removed {success_count} playlists from your library.")
+                st.success(f"Successfully removed {success_count} playlists.")
                 
-                # Deletion Proof / Validation Log
+                # Deletion Proof Download
                 proof_df = pd.DataFrame(log_entries)
                 st.download_button(
                     label="📜 Download Deletion Proof (Log)",
                     data=proof_df.to_csv(index=False).encode('utf-8'),
-                    file_name=f"Deletion_Proof_{datetime.now().strftime('%Y%m%d')}.csv",
+                    file_name=f"Deletion_Log_{datetime.now().strftime('%Y%m%d')}.csv",
                     mime="text/csv"
                 )
                 
-                # Clear state to force a refresh on next load
+                # Clear state to refresh on next load
                 del st.session_state["deleter_table"]
         else:
-            st.info("Select playlists in the table above to enable the delete button.")
+            st.info("Check the 'Delete?' boxes above to begin.")
