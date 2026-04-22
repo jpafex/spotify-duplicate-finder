@@ -1,9 +1,17 @@
 import streamlit as st
 import pandas as pd
 import spotipy
+import sys
+import os
+
+# Path Fix: Ensure the root directory is in the python path so 'pages' can see 'spotify_utils'
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from afexcloud.layout import bootstrap_page
-# Import the new 2026-ready utilities
+# Now try the import
 from spotify_utils import get_playlist_data, get_track_info, process_exportify_csv
+
+# ... (rest of your script)
 
 # 1. Page Config
 st.set_page_config(page_title="Song Lister | AfexCloud", page_icon="📋", layout="wide")
