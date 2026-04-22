@@ -1,16 +1,21 @@
-def get_playlist_data(playlist_obj, field="items"):
+def get_track_obj(item_obj):
     """
-    Safely retrieves playlist metadata (tracks/items) across 
-    2026 and legacy Spotify API versions.
+    Safely retrieves the track/song object from a playlist item.
+    In 2026, 'track' was renamed to 'item' in playlist responses.
     """
-    # 1. New 2026 Rule: 'tracks' renamed to 'items'
-    if 'items' in playlist_obj:
-        return playlist_obj['items']
+    # 1. 2026 Rule: 'track' is now 'item'
+    if 'item' in item_obj:
+        return item_obj['item']
     
-    # 2. Legacy/Grandfathered Rule: Use 'tracks'
-    if 'tracks' in playlist_obj:
-        return playlist_obj['tracks']
+    # 2. Legacy Rule: Use 'track'
+    if 'track' in item_obj:
+        return item_obj['track']
         
-    # 3. Security/Restriction Rule: Return empty structure if field is blocked
-    # This prevents 'KeyError' on restricted non-owned playlists.
-    return {"total": 0, "href": ""}
+    # 3. Fallback: If the object is already the track (e.g. from Search)
+    return item_obj
+
+def get_playlist_data(playlist_obj):
+    """ (Existing function from our last step) """
+    if 'items' in playlist_obj: return playlist_obj['items']
+    if 'tracks' in playlist_obj: return playlist_obj['tracks']
+    return {"total": 0, "items": []}
