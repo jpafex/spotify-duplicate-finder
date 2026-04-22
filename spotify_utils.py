@@ -19,3 +19,19 @@ def get_playlist_data(playlist_obj):
     if 'items' in playlist_obj: return playlist_obj['items']
     if 'tracks' in playlist_obj: return playlist_obj['tracks']
     return {"total": 0, "items": []}
+
+def get_track_info(item_obj):
+    """
+    Safely extracts the track object from a playlist item list.
+    In 2026, 'track' was renamed to 'item' for new Client IDs.
+    """
+    # 1. 2026 Rule: 'track' is now 'item'
+    if 'item' in item_obj:
+        return item_obj['item']
+    
+    # 2. Legacy Rule: Use 'track'
+    if 'track' in item_obj:
+        return item_obj['track']
+        
+    # 3. Fallback: If the object itself is the track (already parsed)
+    return item_obj
