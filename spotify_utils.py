@@ -1,10 +1,8 @@
 import pandas as pd
+import numpy as np
 
 def get_playlist_data(playlist_obj):
-    """
-    Safely retrieves playlist metadata (tracks/items) across 
-    2026 and legacy Spotify API versions.
-    """
+    """Safely retrieves playlist metadata across 2026 and legacy versions."""
     if 'items' in playlist_obj:
         return playlist_obj['items']
     if 'tracks' in playlist_obj:
@@ -12,10 +10,7 @@ def get_playlist_data(playlist_obj):
     return {"total": 0, "items": []}
 
 def get_track_info(item_obj):
-    """
-    Safely extracts the track object from a playlist item.
-    In 2026, 'track' was renamed to 'item' for new Client IDs.
-    """
+    """Handles the 2026 'track' to 'item' field rename."""
     if 'item' in item_obj:
         return item_obj['item']
     if 'track' in item_obj:
@@ -24,13 +19,12 @@ def get_track_info(item_obj):
 
 def process_exportify_csv(uploaded_file):
     """
-    Parses the Exportify CSV to bypass 2026 API redactions.
-    Returns a clean DataFrame with data like BPM and Popularity.
+    Parses Exportify CSV and cleans BPM formatting for AfexCloud standards.
+    Recovers data (BPM, Pop) redacted by the 2026 API.
     """
     df = pd.read_csv(uploaded_file)
     
-    # Mapping Exportify headers to AfexCloud standard
-    # This recovers the BPM (Tempo) data the 2026 API now hides.
+    # Mapping Exportify headers
     df_mapped = df.rename(columns={
         'Track Name': 'Name',
         'Artist Name(s)': 'Artist',
@@ -40,7 +34,11 @@ def process_exportify_csv(uploaded_file):
         'Popularity': 'Pop'
     })
     
-    # Ensure columns exist even if the CSV format changes
+    # NEW: BPM Formatting - Remove decimals and trailing numbers
+    # Converts 134.964 to 134
+    df_mapped['BPM'] = pd.to_numeric(df_mapped['BPM'], errors='coerce').fillna(0).astype(int)
+    
+    # Ensure required columns exist
     required_cols = ['Name', 'Artist', 'Album', 'BPM', 'Pop', 'Spotify-id']
     for col in required_cols:
         if col not in df_mapped.columns:
