@@ -19,7 +19,7 @@ def get_track_info(item_obj):
 
 def process_exportify_csv(uploaded_file):
     """
-    Parses Exportify CSV and cleans BPM formatting for AfexCloud standards.
+    Parses Exportify CSV and strips BPM decimals.
     Recovers data (BPM, Pop) redacted by the 2026 API.
     """
     df = pd.read_csv(uploaded_file)
@@ -34,9 +34,9 @@ def process_exportify_csv(uploaded_file):
         'Popularity': 'Pop'
     })
     
-    # NEW: BPM Formatting - Remove decimals and trailing numbers
-    # Converts 134.964 to 134
-    df_mapped['BPM'] = pd.to_numeric(df_mapped['BPM'], errors='coerce').fillna(0).astype(int)
+    # FORCED BPM CLEANING: Use floor conversion to remove decimals (e.g., 134.964 -> 134)
+    # This prevents Streamlit from "helpfully" re-adding decimals in the UI.
+    df_mapped['BPM'] = pd.to_numeric(df_mapped['BPM'], errors='coerce').fillna(0).apply(np.floor).astype(int)
     
     # Ensure required columns exist
     required_cols = ['Name', 'Artist', 'Album', 'BPM', 'Pop', 'Spotify-id']
