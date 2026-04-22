@@ -3,15 +3,13 @@ import pandas as pd
 import spotipy
 import sys
 import os
+from datetime import datetime
 
-# Path Fix: Ensure the root directory is in the python path so 'pages' can see 'spotify_utils'
+# Path Fix for 'pages' folder access
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from afexcloud.layout import bootstrap_page
-# Now try the import
 from spotify_utils import get_playlist_data, get_track_info, process_exportify_csv
-
-# ... (rest of your script)
 
 # 1. Page Config
 st.set_page_config(page_title="Song Lister | AfexCloud", page_icon="📋", layout="wide")
@@ -21,32 +19,38 @@ auth_manager, token_info = bootstrap_page()
 
 # 3. Tool Logic
 st.title("📋 Song Lister")
-st.info("2026 Update: Use Exportify CSVs to view BPM and Popularity data restricted by the API.")
+st.info("BPM Decimals removed and Line Positions added for standard playlist inventory.")
 
 # Path A: The "Easy Option" (CSV Upload)
 st.subheader("📂 Option 1: Upload Exportify CSV")
-uploaded_file = st.file_uploader("Drop your Exportify CSV here to bypass API Ownership rules", type=["csv"])
+uploaded_file = st.file_uploader("Drop Exportify CSV here to bypass 2026 Ownership rules", type=["csv"])
 
 if uploaded_file:
-    with st.spinner("Processing CSV data..."):
+    with st.spinner("Refining playlist data..."):
         df_csv = process_exportify_csv(uploaded_file)
-        st.success("Successfully loaded data from CSV.")
         
-        # Display the result
+        # NEW: Add line position numbers at the beginning (1, 2, 3...)
+        df_csv.insert(0, 'Pos', range(1, len(df_csv) + 1))
+        
+        st.success("Data Refined: BPM rounded and Position numbers assigned.")
+        
+        # Display the formatted DataFrame
         st.dataframe(df_csv, use_container_width=True, hide_index=True)
         
-        # Download button for the processed version
-        safe_proj = st.session_state.get("global_proj", "project")
+        # NEW: Enhanced Download Button
+        safe_proj = st.session_state.get("global_proj", "Project")
+        timestamp = datetime.now().strftime("%Y%m%d")
+        
         st.download_button(
-            label="📥 Download Clean Inventory",
+            label="📥 Download Cleaned Playlist Inventory",
             data=df_csv.to_csv(index=False).encode('utf-8'),
-            file_name=f"{safe_proj}_clean_list.csv",
+            file_name=f"AfexCloud_{safe_proj}_Cleaned_Inventory_{timestamp}.csv",
             mime="text/csv"
         )
 
 st.write("---")
 
-# Path B: The "API Option" (URL Input)
+# Path B: The "API Option" (URL Input - Still subject to Ownership Wall)
 st.subheader("🌐 Option 2: Spotify URL (API Path)")
 if not token_info:
     st.warning("Connect Spotify via the sidebar to use the API path.")
@@ -55,36 +59,31 @@ else:
     url = st.text_input("Enter Playlist URL/ID:")
 
     if st.button("Generate API Inventory"):
-        if not url:
-            st.error("Please enter a URL.")
-        else:
-            with st.spinner("Fetching from Spotify..."):
-                try:
-                    p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
-                    results = sp.playlist(p_id)
-                    
-                    # 2026 Wrapper: Find 'items' vs 'tracks' 
-                    content = get_playlist_data(results)
-                    items_list = content.get('items', [])
-                    
-                    parsed_tracks = []
-                    for idx, item in enumerate(items_list):
-                        # 2026 Wrapper: Handle 'track' vs 'item' 
-                        t = get_track_info(item)
-                        if t:
-                            parsed_tracks.append({
-                                "Original Pos": idx + 1,
-                                "Name": t.get('name', 'Unknown'),
-                                "Artist": ", ".join([a['name'] for a in t.get('artists', [])]),
-                                "Album": t.get('album', {}).get('name', 'Unknown'),
-                                "Spotify-id": t.get('id')
-                            })
-                    
-                    if not parsed_tracks:
-                        st.warning("No tracks found. (2026 Rule: API access is restricted for non-owned playlists).")
-                    else:
-                        df_api = pd.DataFrame(parsed_tracks)
-                        st.dataframe(df_api, use_container_width=True, hide_index=True)
+        with st.spinner("Fetching from Spotify..."):
+            try:
+                p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
+                results = sp.playlist(p_id)
+                
+                content = get_playlist_data(results)
+                items_list = content.get('items', [])
+                
+                parsed_tracks = []
+                for idx, item in enumerate(items_list):
+                    t = get_track_info(item)
+                    if t:
+                        parsed_tracks.append({
+                            "Pos": idx + 1, # Added line position here too
+                            "Name": t.get('name', 'Unknown'),
+                            "Artist": ", ".join([a['name'] for a in t.get('artists', [])]),
+                            "Album": t.get('album', {}).get('name', 'Unknown'),
+                            "Spotify-id": t.get('id')
+                        })
+                
+                if not parsed_tracks:
+                    st.warning("No tracks found. (2026 Rule: API restricted for non-owned playlists).")
+                else:
+                    df_api = pd.DataFrame(parsed_tracks)
+                    st.dataframe(df_api, use_container_width=True, hide_index=True)
                         
-                except Exception as e:
-                    st.error(f"Spotify API Error: {e}")
+            except Exception as e:
+                st.error(f"Spotify API Error: {e}")
