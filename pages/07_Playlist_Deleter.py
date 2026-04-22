@@ -1,3 +1,6 @@
+# Due to New API Spotify rules, need to tell your existing pages to use this new logic 
+from spotify_utils import get_playlist_data
+
 import streamlit as st
 import pandas as pd
 import spotipy
