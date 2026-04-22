@@ -128,13 +128,12 @@ with tab1:
 
 with tab2:
     st.subheader("🚀 Bulk Create Playlists on Your Account")
-    st.info("This tool turns your Batch CSVs into actual Spotify playlists on your Premium account.")
+    st.info("2026 Rule: Playlists are now created via the 'me' endpoint to ensure ownership.")
     
     if not token_info:
         st.warning("Connect Spotify first via the sidebar.")
     else:
         sp = spotipy.Spotify(auth_manager=auth_manager)
-        user_id = sp.current_user()["id"]
         
         files = st.file_uploader("Upload Batch CSVs to create as playlists", accept_multiple_files=True, type="csv")
         
@@ -142,24 +141,29 @@ with tab2:
             if files:
                 progress_bar = st.progress(0)
                 for idx, f in enumerate(files):
-                    # Use the clean CSV processor
+                    # 1. Process the CSV
                     df_b = pd.read_csv(f)
-                    
-                    # Ensure we have the ID column (Exportify or Afex format)
                     id_col = 'Spotify-id' if 'Spotify-id' in df_b.columns else 'Spotify ID'
                     
                     if id_col in df_b.columns:
-                        # Dynamic Playlist Name
+                        # 2. Dynamic Playlist Name
                         p_name = f"{st.session_state.get('global_proj','')} - {f.name.replace('.csv','')}"
-                        new_p = sp.user_playlist_create(user=user_id, name=p_name, public=False)
                         
-                        # Clean URIs for adding
+                        # FIX: Use current_user_playlist_create (hits POST /me/playlists)
+                        # The old 'user_playlist_create' is now restricted.
+                        new_p = sp.current_user_playlist_create(name=p_name, public=False)
+                        p_id = new_p['id']
+                        
+                        # 3. Prepare Track URIs
                         uris = [tid if tid.startswith('spotify:track:') else f"spotify:track:{tid}" 
                                 for tid in df_b[id_col].dropna().tolist()]
                         
-                        # Add in batches of 100 for safety
+                        # 4. Add items in batches of 100
                         for i in range(0, len(uris), 100):
-                            sp.playlist_add_items(new_p['id'], uris[i:i+100])
+                            batch = uris[i:i+100]
+                            # 2026 COMPLIANCE: The /tracks endpoint is now /items.
+                            # We use a manual POST to ensure we hit the new endpoint if Spotipy is outdated.
+                            sp._post(f"playlists/{p_id}/items", payload={"uris": batch})
                         
                         st.write(f"✅ Created: {p_name}")
                     
