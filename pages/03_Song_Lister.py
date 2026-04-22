@@ -3,6 +3,7 @@ import pandas as pd
 import spotipy
 import sys
 import os
+import re
 from datetime import datetime
 
 # Path Fix for 'pages' folder access
@@ -19,32 +20,36 @@ auth_manager, token_info = bootstrap_page()
 
 # 3. Tool Logic
 st.title("📋 Song Lister")
-st.info("BPM Decimals removed and Line Positions added for standard playlist inventory.")
+st.info("BPM rounding fixed and Dynamic Filenames enabled for better organization.")
 
 # Path A: The "Easy Option" (CSV Upload)
 st.subheader("📂 Option 1: Upload Exportify CSV")
 uploaded_file = st.file_uploader("Drop Exportify CSV here to bypass 2026 Ownership rules", type=["csv"])
 
 if uploaded_file:
+    # EXTRACT PLAYLIST NAME: Strips .csv and replaces special characters for safety
+    raw_filename = uploaded_file.name.rsplit('.', 1)[0]
+    clean_playlist_name = re.sub(r'[^a-zA-Z0-9_]', '_', raw_filename)
+    
     with st.spinner("Refining playlist data..."):
         df_csv = process_exportify_csv(uploaded_file)
         
-        # NEW: Add line position numbers at the beginning (1, 2, 3...)
+        # Add line position numbers at the beginning (1, 2, 3...)
         df_csv.insert(0, 'Pos', range(1, len(df_csv) + 1))
         
-        st.success("Data Refined: BPM rounded and Position numbers assigned.")
+        st.success(f"Data Refined for: {raw_filename}")
         
         # Display the formatted DataFrame
         st.dataframe(df_csv, use_container_width=True, hide_index=True)
         
-        # NEW: Enhanced Download Button
+        # DYNAMIC FILENAME DOWNLOAD
         safe_proj = st.session_state.get("global_proj", "Project")
         timestamp = datetime.now().strftime("%Y%m%d")
         
         st.download_button(
-            label="📥 Download Cleaned Playlist Inventory",
+            label=f"📥 Download Cleaned {raw_filename} Inventory",
             data=df_csv.to_csv(index=False).encode('utf-8'),
-            file_name=f"AfexCloud_{safe_proj}_Cleaned_Inventory_{timestamp}.csv",
+            file_name=f"AfexCloud_{safe_proj}_{clean_playlist_name}_Cleaned_{timestamp}.csv",
             mime="text/csv"
         )
 
@@ -63,6 +68,7 @@ else:
             try:
                 p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
                 results = sp.playlist(p_id)
+                api_playlist_name = re.sub(r'[^a-zA-Z0-9_]', '_', results['name'])
                 
                 content = get_playlist_data(results)
                 items_list = content.get('items', [])
@@ -72,7 +78,7 @@ else:
                     t = get_track_info(item)
                     if t:
                         parsed_tracks.append({
-                            "Pos": idx + 1, # Added line position here too
+                            "Pos": idx + 1,
                             "Name": t.get('name', 'Unknown'),
                             "Artist": ", ".join([a['name'] for a in t.get('artists', [])]),
                             "Album": t.get('album', {}).get('name', 'Unknown'),
@@ -84,6 +90,15 @@ else:
                 else:
                     df_api = pd.DataFrame(parsed_tracks)
                     st.dataframe(df_api, use_container_width=True, hide_index=True)
+                    
+                    # API path also gets a dynamic filename download
+                    safe_proj = st.session_state.get("global_proj", "Project")
+                    st.download_button(
+                        label="📥 Download Cleaned Playlist Inventory",
+                        data=df_api.to_csv(index=False).encode('utf-8'),
+                        file_name=f"AfexCloud_{safe_proj}_{api_playlist_name}_API_Cleaned.csv",
+                        mime="text/csv"
+                    )
                         
             except Exception as e:
                 st.error(f"Spotify API Error: {e}")
