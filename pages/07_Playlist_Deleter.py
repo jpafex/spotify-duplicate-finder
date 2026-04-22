@@ -1,4 +1,4 @@
-# Due to New API Spotify rules, need to tell your existing pages to use this new logic 
+# Due to New API Spotify rules, we use this wrapper to handle field renames
 from spotify_utils import get_playlist_data
 
 import streamlit as st
@@ -29,7 +29,9 @@ else:
             results = sp.current_user_playlists(limit=50)
             playlists = []
             for p in results['items']:
-                # DUAL FORMATTING: Adding both URI and Web URL
+                # WRAPPER TIE-IN: Safely fetch metadata for 2026 compliance
+                meta = get_playlist_data(p)
+                
                 raw_id = p['id']
                 full_uri = f"spotify:playlist:{raw_id}"
                 web_url = f"https://open.spotify.com/playlist/{raw_id}"
@@ -37,10 +39,10 @@ else:
                 playlists.append({
                     "Delete?": False,
                     "Playlist Name": p['name'],
-                    "Web Player Link": web_url, # Browser-friendly
-                    "Tracks": p['tracks']['total'],
+                    "Web Player Link": web_url,
+                    "Tracks": meta.get('total', 0), # Uses wrapper result safely
                     "Owner": p['owner']['display_name'],
-                    "Spotify URI": full_uri  # Still stored but hidden
+                    "Spotify URI": full_uri
                 })
             st.session_state["deleter_table"] = pd.DataFrame(playlists)
 
@@ -52,7 +54,6 @@ else:
         st.subheader("📋 Step 1: Pre-Deletion Inventory")
         st.caption("Select playlists to delete and copy their browser links.")
 
-        # Interactive Table for copying and selecting
         edited_df = st.data_editor(
             df,
             hide_index=True,
@@ -65,7 +66,6 @@ else:
             column_order=["Delete?", "Playlist Name", "Web Player Link", "Tracks", "Owner"]
         )
 
-        # Pre-Deletion Download (Still contains both columns for reference)
         csv_inventory = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download Current Inventory (CSV)",
@@ -88,8 +88,6 @@ else:
                 
                 for _, row in to_del_df.iterrows():
                     try:
-                        # Extract the raw ID from the web link
-                        # URL format: https://open.spotify.com/playlist/{raw_id}
                         raw_id = row["Web Player Link"].split("/")[-1]
                         sp.current_user_unfollow_playlist(raw_id)
                         
@@ -105,7 +103,6 @@ else:
 
                 st.success(f"Successfully removed {success_count} playlists.")
                 
-                # Deletion Proof Download
                 proof_df = pd.DataFrame(log_entries)
                 st.download_button(
                     label="📜 Download Deletion Proof (Log)",
@@ -114,7 +111,6 @@ else:
                     mime="text/csv"
                 )
                 
-                # Clear state to refresh on next load
                 del st.session_state["deleter_table"]
         else:
             st.info("Check the 'Delete?' boxes above to enable the delete button.")
