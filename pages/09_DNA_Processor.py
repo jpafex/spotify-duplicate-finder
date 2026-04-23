@@ -60,7 +60,6 @@ if exp_f and loc_f:
             )
 
             # C. THE MARRIAGE (Left Join)
-            # Keeping all local rows; unmatched Spotify columns will be NaN
             enriched_df = pd.merge(
                 df_loc, 
                 df_exp[['match_key', 'BPM', 'Camelot_Source', 'Spotify-id']], 
@@ -69,8 +68,8 @@ if exp_f and loc_f:
             )
 
             # D. THE FLAGGING SYSTEM
-            # If BPM or Camelot is missing from the join, it's a mismatch
-            enriched_df['Flag'] = enriched_df['BPM'].apply(lambda x: "✅ Enriched" if pd.notnull(x) else "🚩 Missing Metadata")
+            # Using clean text prefix + emoji for maximum compatibility
+            enriched_df['Flag'] = enriched_df['BPM'].apply(lambda x: "✅ Enriched" if pd.notnull(x) else "🚩 Missing")
 
             # E. UI Cleanup
             enriched_df = enriched_df.rename(columns={
@@ -90,7 +89,7 @@ if exp_f and loc_f:
             final_df['Camelot'] = final_df['Camelot'].fillna("N/A")
 
             # F. Metrics Dashboard
-            m_count = (final_df['Flag'] == "🚩 Missing Metadata").sum()
+            m_count = (final_df['Flag'] == "🚩 Missing").sum()
             e_count = len(final_df) - m_count
             
             m1, m2 = st.columns(2)
@@ -112,8 +111,8 @@ if exp_f and loc_f:
             # H. THE FLAG REPORT: Isolated Missing Data
             if m_count > 0:
                 with st.expander(f"🚩 View {m_count} tracks that failed to find metadata", expanded=True):
-                    st.warning("These local files did not match the Spotify Inventory. Check for album name differences or missing remixes.")
-                    flagged_df = final_df[final_df['Flag'] == "🚩 Missing Metadata"].drop(columns=['Flag'])
+                    st.warning("These local files did not match the Spotify Inventory.")
+                    flagged_df = final_df[final_df['Flag'] == "🚩 Missing"].drop(columns=['Flag'])
                     st.dataframe(flagged_df, use_container_width=True, hide_index=True)
 
             # I. DYNAMIC MASTER DOWNLOAD
@@ -122,10 +121,11 @@ if exp_f and loc_f:
             clean_p_name = re.sub(r'[^a-zA-Z0-9_]', '_', p_name_raw)
             timestamp = datetime.now().strftime("%Y%m%d")
             
+            # KAIZEN FIX: Added 'utf-8-sig' to prevent 'âœ…' characters in Excel
             st.download_button(
-                label=f"📥 Download Enriched & Flagged Log ({p_name_raw})",
-                data=final_df.to_csv(index=False).encode('utf-8'),
-                file_name=f"DNA_Enriched_{safe_proj}_{clean_p_name}_{timestamp}.csv",
+                label=f"📥 Download Enriched Master Log",
+                data=final_df.to_csv(index=False).encode('utf-8-sig'),
+                file_name=f"DNA_Enriched_{safe_proj}_{clean_p_name}.csv",
                 mime="text/csv",
                 use_container_width=True
             )
