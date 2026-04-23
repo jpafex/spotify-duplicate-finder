@@ -41,6 +41,33 @@ def process_exportify_csv(uploaded_file):
     # Ensure required columns exist
     required_cols = ['Name', 'Artist', 'Album', 'BPM', 'Pop', 'Spotify-id']
     for col in required_cols:
+
+def process_exportify_csv_trimmed(uploaded_file):
+    """
+    Trims Exportify data to the Core Four: Pos, Name, Artist, Album.
+    Standardizes headers for the Collection Reviewer.
+    """
+    df = pd.read_csv(uploaded_file)
+    
+    # Mapping Exportify headers
+    df_mapped = df.rename(columns={
+        'Track Name': 'Name',
+        'Artist Name(s)': 'Artist',
+        'Album Name': 'Album',
+        'Track URI': 'Spotify-id'
+    })
+    
+    # Add the Original Pos (1, 2, 3...)
+    df_mapped.insert(0, 'Pos', range(1, len(df_mapped) + 1))
+    
+    # Trim to requested columns only
+    cols_to_keep = ['Pos', 'Name', 'Artist', 'Album']
+    # Ensure they exist (fallback to empty string if missing)
+    for col in cols_to_keep:
+        if col not in df_mapped.columns:
+            df_mapped[col] = ""
+            
+    return df_mapped[cols_to_keep]        
         if col not in df_mapped.columns:
             df_mapped[col] = "N/A"
             
