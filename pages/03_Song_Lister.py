@@ -21,17 +21,13 @@ auth_manager, token_info = bootstrap_page()
 # 3. Tool Logic
 st.title("📋 Song Lister")
 
-# --- NEWBIE GUIDE & EXPORTIFY LINK ---
-with st.expander("🆕 New here? How to get a CSV from Exportify", expanded=True):
+# Newbie Guide for Mirroring
+with st.expander("🆕 Mirroring Guide", expanded=False):
     st.markdown("""
-    Because of the **2026 Spotify API rules**, we use **Exportify** to get data (like BPM) that Spotify now hides.
-    1.  **Open [Exportify.net](https://exportify.net/)** in a new tab.
-    2.  **Log in** with your Spotify account.
-    3.  Find the playlist you need to analyze.
-    4.  Click the green **'Export'** button to download the CSV.
-    5.  Drag and drop that CSV into **Option 1** below!
+    1. **Export** any client playlist via [Exportify.net](https://exportify.net/).
+    2. **Upload** the CSV below to see BPM and assign Position numbers.
+    3. **Mirror**: Click the push button to create a copy on your own account for full API access.
     """)
-    st.link_button("🔗 Go to Exportify.net", "https://exportify.net/")
 
 st.write("---")
 
@@ -40,17 +36,18 @@ st.subheader("📂 Option 1: Upload Exportify CSV")
 uploaded_file = st.file_uploader("Drop Exportify CSV here to bypass 2026 Ownership rules", type=["csv"])
 
 if uploaded_file:
-    # Extract name for the dynamic download filename
+    # Extract playlist name for dynamic usage
     raw_filename = uploaded_file.name.rsplit('.', 1)[0]
     clean_p_name = re.sub(r'[^a-zA-Z0-9_]', '_', raw_filename)
     
     with st.spinner("Refining playlist data..."):
+        # standardizing headers and rounding BPM
         df_csv = process_exportify_csv(uploaded_file)
         
-        # Add line position numbers at the beginning
+        # Add line position numbers (1, 2, 3...)
         df_csv.insert(0, 'Pos', range(1, len(df_csv) + 1))
         
-        # DISPLAY FIX: Force BPM to a string to hide all decimals/trailing zeros
+        # Display fix for BPM decimals
         df_csv['BPM'] = df_csv['BPM'].astype(str)
         
         st.success(f"Data Refined for: {raw_filename}")
@@ -58,16 +55,50 @@ if uploaded_file:
         # Display the formatted DataFrame
         st.dataframe(df_csv, use_container_width=True, hide_index=True)
         
-        # DYNAMIC FILENAME DOWNLOAD
-        safe_proj = st.session_state.get("global_proj", "Project")
-        timestamp = datetime.now().strftime("%Y%m%d")
+        # Action Row: Download and Mirror
+        c1, c2 = st.columns(2)
         
-        st.download_button(
-            label=f"📥 Download Cleaned {raw_filename} Inventory",
-            data=df_csv.to_csv(index=False).encode('utf-8'),
-            file_name=f"AfexCloud_{safe_proj}_{clean_p_name}_Cleaned_{timestamp}.csv",
-            mime="text/csv"
-        )
+        with c1:
+            safe_proj = st.session_state.get("global_proj", "Project")
+            timestamp = datetime.now().strftime("%Y%m%d")
+            st.download_button(
+                label=f"📥 Download Cleaned {raw_filename} Inventory",
+                data=df_csv.to_csv(index=False).encode('utf-8-sig'),
+                file_name=f"AfexCloud_{safe_proj}_{clean_p_name}_Cleaned_{timestamp}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            
+        with c2:
+            st.write("---")
+            st.subheader("🚀 Mirror to My Spotify")
+            mirror_name = st.text_input("New Playlist Name:", value=f"Mirror - {raw_filename}")
+            
+            if st.button("🔥 PUSH MIRROR TO MY ACCOUNT"):
+                if not token_info:
+                    st.error("Connect Spotify first via the sidebar.")
+                else:
+                    try:
+                        sp = spotipy.Spotify(auth_manager=auth_manager)
+                        
+                        # 2026 Rule: Must use current_user_playlist_create (POST /me/playlists)
+                        new_p = sp.current_user_playlist_create(name=mirror_name, public=False)
+                        p_id = new_p['id']
+                        
+                        # Prepare Track URIs from CSV
+                        uris = [tid if str(tid).startswith('spotify:track:') else f"spotify:track:{tid}" 
+                                for tid in df_csv['Spotify-id'].dropna().tolist()]
+                        
+                        # Add items in 2026-compliant batches of 100
+                        for i in range(0, len(uris), 100):
+                            batch = uris[i:i+100]
+                            # Targeting the new /items endpoint suffix
+                            sp._post(f"playlists/{p_id}/items", payload={"uris": batch})
+                        
+                        st.success(f"Successfully mirrored '{mirror_name}' with {len(uris)} tracks!")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Mirroring failed: {e}")
 
 st.write("---")
 
@@ -84,7 +115,6 @@ else:
             try:
                 p_id = url.split('/')[-1].split('?')[0] if '/' in url else url
                 results = sp.playlist(p_id)
-                api_p_name = re.sub(r'[^a-zA-Z0-9_]', '_', results['name'])
                 
                 content = get_playlist_data(results)
                 items_list = content.get('items', [])
@@ -106,14 +136,6 @@ else:
                 else:
                     df_api = pd.DataFrame(parsed_tracks)
                     st.dataframe(df_api, use_container_width=True, hide_index=True)
-                    
-                    safe_proj = st.session_state.get("global_proj", "Project")
-                    st.download_button(
-                        label="📥 Download Cleaned Playlist Inventory",
-                        data=df_api.to_csv(index=False).encode('utf-8'),
-                        file_name=f"AfexCloud_{safe_proj}_{api_p_name}_API_Cleaned.csv",
-                        mime="text/csv"
-                    )
                         
             except Exception as e:
                 st.error(f"Spotify API Error: {e}")
