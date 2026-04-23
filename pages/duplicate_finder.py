@@ -1,112 +1,104 @@
 import streamlit as st
 import pandas as pd
 import re
-import unicodedata
-from collections import defaultdict
 import sys
 import os
 from datetime import datetime
 import spotipy
+from collections import defaultdict
 
-# Path Fix for 'pages' folder access
+# Path Fix
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from afexcloud.layout import bootstrap_page
-from spotify_utils import get_playlist_data, get_track_info, process_exportify_csv
+from spotify_utils import process_exportify_csv
 
 # 1. Page Config
 st.set_page_config(page_title="Duplicate Finder | AfexCloud", page_icon="🔍", layout="wide")
-
-# 2. Bootstrap Style & Security
 auth_manager, token_info = bootstrap_page()
 
-# 3. Tool Helpers
-def advanced_normalize(text):
-    """Normalization logic to catch subtle duplicates."""
-    if not isinstance(text, str): text = str(text)
-    text = unicodedata.normalize('NFKD', text)
-    text = "".join([c for c in text if not unicodedata.combining(c)])
-    text = text.lower()
-    text = re.sub(r'[^a-z0-9\s]', '', text)
-    return re.sub(r'\s+', ' ', text).strip()
+st.title("🔍 Duplicate Finder & Cleaner")
 
-# 4. Tool Logic
-st.title("🔍 Duplicate Finder")
-
-with st.expander("🆕 Newbie Guide: Mirroring & Cleaning", expanded=False):
+# --- NEWBIE GUIDE ---
+with st.expander("🆕 How to 'Clean' a Client Playlist", expanded=False):
     st.markdown("""
-    1.  **Export** the client playlist via [Exportify.net](https://exportify.net/).
-    2.  **Upload** the CSV below.
-    3.  **Push** the 'Cleaned' version to your account to get ownership and full API access.
+    1.  **Upload** the Exportify CSV.
+    2.  The tool identifies duplicates (redundant copies).
+    3.  The **'Push'** button creates a new playlist on your account with **only unique songs** (e.g., 167 total becomes 153 unique).
     """)
 
 st.write("---")
 
-# Path A: The "Easy Option" (CSV Upload)
-st.subheader("📂 Option 1: Upload Exportify CSV")
-uploaded_file = st.file_uploader("Drop Exportify CSV here", type=["csv"])
+uploaded_file = st.file_uploader("Upload Exportify CSV", type=["csv"])
 
 if uploaded_file:
     raw_filename = uploaded_file.name.rsplit('.', 1)[0]
-    clean_p_name = re.sub(r'[^a-zA-Z0-9_]', '_', raw_filename)
     
-    with st.spinner("Analyzing for duplicates..."):
+    with st.spinner("Analyzing tracks..."):
         df_csv = process_exportify_csv(uploaded_file)
+        total_count = len(df_csv)
         
-        # Track unique vs duplicate tracks
-        unique_tracks = []
-        all_dupes = []
+        # LOGIC: Separate the 'First Occurrences' from the 'Extras'
+        unique_rows = []
+        duplicate_rows = []
         seen_ids = set()
 
         for idx, row in df_csv.iterrows():
             tid = row['Spotify-id']
             if tid not in seen_ids:
-                unique_tracks.append(tid)
+                unique_rows.append(row) # This builds your 153-song list
                 seen_ids.add(tid)
             else:
-                all_dupes.append(row.to_dict())
-        
-        if all_dupes:
-            df_dupes = pd.DataFrame(all_dupes)
-            df_dupes.insert(0, 'Pos', range(1, len(df_dupes) + 1))
-            df_dupes['BPM'] = df_dupes['BPM'].astype(str)
-            
-            st.warning(f"Found {len(all_dupes)} duplicates in '{raw_filename}'.")
-            st.dataframe(df_dupes, use_container_width=True, hide_index=True)
-            
-            # --- ACTION BUTTONS ---
-            c1, c2 = st.columns(2)
-            with c1:
-                # Download the report
-                safe_proj = st.session_state.get("global_proj", "Project")
+                duplicate_rows.append(row) # This builds your 14-song 'extras' list
+
+        # 1. Display Audit Summary
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Original Total", total_count)
+        c2.metric("Duplicates Found", len(duplicate_rows), delta_color="inverse")
+        c3.metric("Cleaned Result", len(unique_rows))
+
+        # 2. Show the Duplicates (The "Redundant" tracks we are removing)
+        if duplicate_rows:
+            with st.expander(f"🚩 View {len(duplicate_rows)} Duplicates to be removed", expanded=True):
+                df_dupes = pd.DataFrame(duplicate_rows)
+                df_dupes.insert(0, 'Pos', range(1, len(df_dupes) + 1))
+                df_dupes['BPM'] = df_dupes['BPM'].astype(str)
+                st.dataframe(df_dupes, use_container_width=True, hide_index=True)
+                
+                # Download Report
                 st.download_button(
-                    label="📥 Download Duplicate Report",
+                    "📥 Download Duplicate Audit Report",
                     data=df_dupes.to_csv(index=False).encode('utf-8'),
-                    file_name=f"AfexCloud_{safe_proj}_{clean_p_name}_Duplicates.csv",
-                    mime="text/csv"
+                    file_name=f"Audit_Duplicates_{raw_filename}.csv"
                 )
-            
-            with c2:
-                # 2026 PUSH LOGIC
-                if st.button("🚀 PUSH CLEANED PLAYLIST TO MY SPOTIFY"):
-                    if not token_info:
-                        st.error("Connect Spotify first.")
-                    else:
-                        try:
-                            sp = spotipy.Spotify(auth_manager=auth_manager)
-                            # Use 2026-compliant 'current_user' endpoint 
-                            new_p_name = f"Cleaned - {raw_filename}"
-                            new_p = sp.current_user_playlist_create(name=new_p_name, public=False)
-                            
-                            # Add unique tracks in batches 
-                            uris = [t if t.startswith('spotify:track:') else f"spotify:track:{t}" for t in unique_tracks]
-                            for i in range(0, len(uris), 100):
-                                batch = uris[i:i+100]
-                                sp._post(f"playlists/{new_p['id']}/items", payload={"uris": batch})
-                            
-                            st.success(f"Successfully created '{new_p_name}' on your account!")
-                            st.balloons()
-                        except Exception as e:
-                            st.error(f"Push failed: {e}")
-        else:
-            st.success("No duplicates found! Your CSV data is already clean.")
+
+        st.write("---")
+
+        # 3. PUSH THE CLEANED LIST (The 153 Songs)
+        st.subheader("🚀 Step 2: Push Cleaned Playlist")
+        st.write(f"This will create a new playlist on your account with **{len(unique_rows)} unique songs**.")
+        
+        new_p_name = st.text_input("New Playlist Name:", value=f"Cleaned - {raw_filename}")
+        
+        if st.button("🔥 CREATE CLEANED PLAYLIST ON MY ACCOUNT"):
+            if not token_info:
+                st.error("Connect Spotify first via the sidebar.")
+            else:
+                try:
+                    sp = spotipy.Spotify(auth_manager=auth_manager)
+                    
+                    # Create the new playlist
+                    new_p = sp.current_user_playlist_create(name=new_p_name, public=False)
+                    
+                    # Gather URIs for ALL unique songs (the 153 tracks)
+                    uris = [r['Spotify-id'] if str(r['Spotify-id']).startswith('spotify:track:') 
+                            else f"spotify:track:{r['Spotify-id']}" for r in unique_rows]
+                    
+                    # Push in batches of 100
+                    for i in range(0, len(uris), 100):
+                        batch = uris[i:i+100]
+                        sp._post(f"playlists/{new_p['id']}/items", payload={"uris": batch})
+                    
+                    st.success(f"Successfully created '{new_p_name}' with {len(unique_rows)} unique tracks!")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Push failed: {e}")
