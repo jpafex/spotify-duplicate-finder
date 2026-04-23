@@ -21,31 +21,33 @@ def get_camelot(key_num, mode):
 # 3. Tool Logic
 st.title("🌉 DNA Processor (Universal Bridge)")
 
-if st.button("🔄 Reset & Upload New Project"):
+if st.button("🔄 Reset & Start New Ingestion"):
     st.rerun()
 
-st.info("🧬 **Flagship Mode**: Enriching local files with Spotify Metadata & Flagging mismatches.")
+st.info("🧬 **Flagship Mode**: Marrying high-fidelity Spotify metadata to your local collection.")
 
-# TWO-STAGE UPLOADER
+# --- STEP-BY-STEP UPLOADER ---
 c1, c2 = st.columns(2)
 with c1:
-    st.subheader("1. Metadata Source")
-    exp_f = st.file_uploader("Upload Exportify CSV (BPM/Key Source)", type=["csv"])
+    # UPDATED: More descriptive header for newbies
+    st.subheader("1. Metadata Source from Exportify File")
+    st.caption("This file provides the BPM and Camelot Keys Spotify now hides.")
+    exp_f = st.file_uploader("Drop Exportify CSV here", type=["csv"], key="exp_src", label_visibility="collapsed")
 with c2:
-    st.subheader("2. Local Files")
-    loc_f = st.file_uploader("Upload MP3Tag CSV (Target)", type=["csv"])
+    # UPDATED: More descriptive header for newbies
+    st.subheader("2. Local Files from Mp3Tag File")
+    st.caption("This file is your current library inventory exported from Mp3Tag.")
+    loc_f = st.file_uploader("Drop Mp3Tag CSV here", type=["csv"], key="loc_src", label_visibility="collapsed")
 
 if exp_f and loc_f:
     try:
-        with st.spinner("Executing metadata marriage & analysis..."):
+        with st.spinner("🔗 Linking files and injecting metadata..."):
             # A. Process Exportify Side
             df_exp = process_exportify_csv(exp_f)
-            
-            # Map Mode and Key for Camelot generation
             df_exp = df_exp.rename(columns={'Key': 'Key_Num', 'Mode': 'Mode_Num'})
             df_exp['Camelot_Source'] = df_exp.apply(lambda r: get_camelot(r.get('Key_Num', 0), r.get('Mode_Num', 1)), axis=1)
             
-            # Create Triple-Match Key
+            # Create Triple-Match Key for accuracy
             df_exp["match_key"] = df_exp.apply(
                 lambda r: f"{advanced_normalize(r['Name'])}__{advanced_normalize(r['Artist'])}__{advanced_normalize(r['Album'])}", 
                 axis=1
@@ -53,22 +55,15 @@ if exp_f and loc_f:
 
             # B. Process Local Side (MP3Tag)
             df_loc = pd.read_csv(loc_f)
-            # Match keys based on MP3Tag positions (Title, Artist, Album)
             df_loc["match_key"] = df_loc.apply(
                 lambda r: f"{advanced_normalize(str(r.iloc[0]))}__{advanced_normalize(str(r.iloc[1]))}__{advanced_normalize(str(r.iloc[2]))}" 
                 if len(r) >= 3 else "", axis=1
             )
 
-            # C. THE MARRIAGE (Left Join)
-            enriched_df = pd.merge(
-                df_loc, 
-                df_exp[['match_key', 'BPM', 'Camelot_Source', 'Spotify-id']], 
-                on='match_key', 
-                how='left'
-            )
+            # C. THE MARRIAGE
+            enriched_df = pd.merge(df_loc, df_exp[['match_key', 'BPM', 'Camelot_Source', 'Spotify-id']], on='match_key', how='left')
 
             # D. THE FLAGGING SYSTEM
-            # Using clean text prefix + emoji for maximum compatibility
             enriched_df['Flag'] = enriched_df['BPM'].apply(lambda x: "✅ Enriched" if pd.notnull(x) else "🚩 Missing")
 
             # E. UI Cleanup
@@ -80,23 +75,20 @@ if exp_f and loc_f:
                 'Spotify-id': 'Spotify ID'
             })
             
-            # Display Columns
             display_cols = ['Flag', 'Name', 'Artist', 'Album', 'BPM', 'Camelot', 'Spotify ID']
             final_df = enriched_df[display_cols].copy()
-            
-            # Format BPM for clear display
             final_df['BPM'] = final_df['BPM'].fillna(0).astype(int).astype(str)
             final_df['Camelot'] = final_df['Camelot'].fillna("N/A")
 
-            # F. Metrics Dashboard
+            # F. Visual Metrics Dashboard
             m_count = (final_df['Flag'] == "🚩 Missing").sum()
             e_count = len(final_df) - m_count
             
             m1, m2 = st.columns(2)
-            m1.metric("Enriched Successfully", e_count)
-            m2.metric("Flags (Mismatches)", m_count, delta_color="inverse")
+            m1.metric("Tracks Enriched", e_count)
+            m2.metric("Metadata Mismatches", m_count, delta_color="inverse")
 
-            # G. MAIN DISPLAY: The Master Enriched Log
+            # G. MAIN DISPLAY
             st.write("### 💎 Enriched Master DJ Log")
             st.data_editor(
                 final_df,
@@ -108,22 +100,15 @@ if exp_f and loc_f:
                 }
             )
 
-            # H. THE FLAG REPORT: Isolated Missing Data
-            if m_count > 0:
-                with st.expander(f"🚩 View {m_count} tracks that failed to find metadata", expanded=True):
-                    st.warning("These local files did not match the Spotify Inventory.")
-                    flagged_df = final_df[final_df['Flag'] == "🚩 Missing"].drop(columns=['Flag'])
-                    st.dataframe(flagged_df, use_container_width=True, hide_index=True)
-
-            # I. DYNAMIC MASTER DOWNLOAD
+            # H. DYNAMIC MASTER DOWNLOAD
             safe_proj = st.session_state.get("_safe_proj", "Project")
             p_name_raw = exp_f.name.rsplit('.', 1)[0]
             clean_p_name = re.sub(r'[^a-zA-Z0-9_]', '_', p_name_raw)
             timestamp = datetime.now().strftime("%Y%m%d")
             
-            # KAIZEN FIX: Added 'utf-8-sig' to prevent 'âœ…' characters in Excel
+            # KAIZEN: utf-8-sig ensures emojis render correctly in Excel
             st.download_button(
-                label=f"📥 Download Enriched Master Log",
+                label=f"📥 Save Enriched Master Log for {p_name_raw}",
                 data=final_df.to_csv(index=False).encode('utf-8-sig'),
                 file_name=f"DNA_Enriched_{safe_proj}_{clean_p_name}.csv",
                 mime="text/csv",
@@ -131,4 +116,4 @@ if exp_f and loc_f:
             )
 
     except Exception as e:
-        st.error(f"Metadata marriage failed: {e}")
+        st.error(f"Bridge connection failed: {e}")
