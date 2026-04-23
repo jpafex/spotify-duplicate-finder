@@ -41,6 +41,10 @@ def process_exportify_csv(uploaded_file):
     # Ensure required columns exist
     required_cols = ['Name', 'Artist', 'Album', 'BPM', 'Pop', 'Spotify-id']
     for col in required_cols:
+        if col not in df_mapped.columns:
+            df_mapped[col] = "N/A"
+            
+    return df_mapped[required_cols]
 
 def process_exportify_csv_trimmed(uploaded_file):
     """
@@ -67,8 +71,4 @@ def process_exportify_csv_trimmed(uploaded_file):
         if col not in df_mapped.columns:
             df_mapped[col] = ""
             
-    return df_mapped[cols_to_keep]        
-        if col not in df_mapped.columns:
-            df_mapped[col] = "N/A"
-            
-    return df_mapped[required_cols]
+    return df_mapped[cols_to_keep]
