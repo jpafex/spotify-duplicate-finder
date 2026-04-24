@@ -34,12 +34,16 @@ else:
             
             while results:
                 for p in results['items']:
+                    # KAIZEN FIX: Use .get() to prevent crashes on non-standard playlists
+                    tracks_info = p.get('tracks', {})
+                    owner_info = p.get('owner', {})
+                    
                     playlists.append({
-                        "Name": p['name'],
-                        "Tracks": p['tracks']['total'],
-                        "ID": p['id'],
-                        "Owner": p['owner']['display_name'],
-                        "Is_Owner": p['owner']['id'] == sp.current_user()['id']
+                        "Name": p.get('name', 'Unnamed Playlist'),
+                        "Tracks": tracks_info.get('total', 0),
+                        "ID": p.get('id'),
+                        "Owner": owner_info.get('display_name', 'Unknown'),
+                        "Is_Owner": owner_info.get('id') == sp.current_user()['id']
                     })
                 results = sp.next(results) if results['next'] else None
             
