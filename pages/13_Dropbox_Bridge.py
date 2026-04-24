@@ -12,7 +12,7 @@ bootstrap_page()
 
 st.title("📦 Dropbox Bridge (Library Mapper)")
 
-# 2. Heavy-Duty Parser
+# 2. Parser Logic
 def parse_music_filename(filename):
     clean_name = os.path.splitext(filename)[0]
     noise = [r'\(.*?\)', r'\[.*?\]', r'feat\..*', r'ft\..*', r'\d{3}k', r'kbps', r'explicit', r'official']
@@ -28,7 +28,10 @@ def parse_music_filename(filename):
     return "Unknown Artist", clean_name.strip().title()
 
 # 3. Connection & Logic
-if st.button("🔄 Clear and Refresh Cloud Cache"):
+# KAIZEN: Explicitly clear session state to fix the KeyError
+if st.button("🔄 Clear Cache & Force Fresh Map"):
+    if 'cloud_inventory' in st.session_state:
+        del st.session_state['cloud_inventory']
     st.rerun()
 
 try:
@@ -59,9 +62,7 @@ if st.button("🚀 Start Deep Scan & Map"):
                     if isinstance(entry, dropbox.files.FileMetadata):
                         if entry.name.lower().endswith(('.mp3', '.m4a', '.wav')):
                             artist, title = parse_music_filename(entry.name)
-                            
-                            # KAIZEN: Extract the Immediate Parent Folder Name
-                            # Path looks like: /Music/Latin/Cumbia/Song.mp3 -> Folder: Cumbia
+                            # Extract folder name
                             folder_name = os.path.basename(os.path.dirname(entry.path_display))
                             
                             files_found.append({
@@ -80,7 +81,7 @@ if st.button("🚀 Start Deep Scan & Map"):
             if files_found:
                 df = pd.DataFrame(files_found)
                 st.session_state['cloud_inventory'] = df
-                st.success(f"Mapping Complete: {len(df)} tracks categorized across your folders.")
+                st.success(f"Mapping Complete: {len(df)} tracks categorized.")
 
     except Exception as e:
         st.error(f"Scan failed: {e}")
@@ -89,44 +90,40 @@ if st.button("🚀 Start Deep Scan & Map"):
 if 'cloud_inventory' in st.session_state:
     df = st.session_state['cloud_inventory']
     
-    # --- KAIZEN: FOLDER NAVIGATOR ---
-    st.write("---")
-    with st.expander("📂 Folder Navigator", expanded=False):
-        # Extract unique folder names
-        unique_folders = sorted(df['Folder'].unique().tolist())
-        st.write(f"Your library is organized into **{len(unique_folders)}** unique folders.")
-        
-        selected_folder = st.selectbox("View contents of a specific folder:", ["All Folders"] + unique_folders)
-        
-        if selected_folder != "All Folders":
-            folder_view = df[df['Folder'] == selected_folder]
-            st.write(f"Displaying **{len(folder_view)}** tracks in `{selected_folder}`")
-            st.dataframe(folder_view[['Name', 'Artist', 'Full Path']], use_container_width=True, hide_index=True)
-
-    # --- SEARCH & AUDIT ---
-    st.write("---")
-    st.subheader("🔍 Library Audit Search")
-    search_q = st.text_input("Search Artist, Title, or Folder:")
-    
-    if search_q:
-        # Search across all three main columns
-        filtered_df = df[df.apply(lambda r: search_q.lower() in f"{r['Name']} {r['Artist']} {r['Folder']}".lower(), axis=1)]
+    # SAFETY CHECK: If 'Folder' is missing from an old session, force a message
+    if 'Folder' not in df.columns:
+        st.warning("⚠️ Old data detected. Please click 'Clear Cache & Force Fresh Map' above.")
     else:
-        filtered_df = df.head(100)
+        st.write("---")
+        with st.expander("📂 Folder Navigator", expanded=False):
+            unique_folders = sorted(df['Folder'].unique().tolist())
+            st.write(f"Your library has **{len(unique_folders)}** unique folders.")
+            
+            selected_folder = st.selectbox("View a specific folder:", ["All Folders"] + unique_folders)
+            
+            if selected_folder != "All Folders":
+                folder_view = df[df['Folder'] == selected_folder]
+                st.write(f"Displaying **{len(folder_view)}** tracks in `{selected_folder}`")
+                st.dataframe(folder_view[['Name', 'Artist', 'Full Path']], use_container_width=True, hide_index=True)
 
-    st.dataframe(filtered_df[['Name', 'Artist', 'Folder', 'Full Path']], use_container_width=True, hide_index=True)
-    
-    # Gap Mirror Bridge with FOLDER data
-    st.write("---")
-    st.subheader("📥 Export Master Audit")
-    st.caption("This CSV now includes the 'Folder' column to help your team locate files quickly.")
-    
-    # We include Folder in the download so it shows up in the Gap Mirror
-    master_csv = df[['Name', 'Artist', 'Album', 'Folder', 'Full Path']].to_csv(index=False).encode('utf-8-sig')
-    st.download_button(
-        label=f"📥 Download Master Cloud Inventory ({len(df)} Tracks)",
-        data=master_csv,
-        file_name=f"Dropbox_Mapped_Inventory_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
+        st.write("---")
+        st.subheader("🔍 Library Audit Search")
+        search_q = st.text_input("Search Artist, Title, or Folder:")
+        
+        if search_q:
+            filtered_df = df[df.apply(lambda r: search_q.lower() in f"{r['Name']} {r['Artist']} {r['Folder']}".lower(), axis=1)]
+        else:
+            filtered_df = df.head(100)
+
+        st.dataframe(filtered_df[['Name', 'Artist', 'Folder', 'Full Path']], use_container_width=True, hide_index=True)
+        
+        st.write("---")
+        st.subheader("📥 Export Master Audit")
+        master_csv = df[['Name', 'Artist', 'Album', 'Folder', 'Full Path']].to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label=f"📥 Download Master Cloud Inventory ({len(df)} Tracks)",
+            data=master_csv,
+            file_name=f"Dropbox_Mapped_Inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
