@@ -10,39 +10,29 @@ from afexcloud.layout import bootstrap_page
 st.set_page_config(page_title="Dropbox Bridge | AfexCloud", page_icon="📦", layout="wide")
 bootstrap_page()
 
-st.title("📦 Dropbox Bridge (Smart Cloud Indexer)")
+st.title("📦 Dropbox Bridge (Heavy-Duty Indexer)")
 
-# 2. Refined Parsing Logic (The Smart Parser)
+# 2. THE REFINED PARSER
 def parse_music_filename(filename):
-    """
-    KAIZEN: Uses Regex to intelligently separate Artist and Title.
-    Handles track numbers, underscores, and multiple hyphens.
-    """
-    # Remove extension
     clean_name = os.path.splitext(filename)[0]
+    # Remove metadata noise commonly found in cloud music
+    noise = [r'\(.*?\)', r'\[.*?\]', r'feat\..*', r'ft\..*', r'\d{3}k', r'kbps', r'explicit', r'official']
+    for p in noise:
+        clean_name = re.sub(p, '', clean_name, flags=re.IGNORECASE)
     
-    # Pattern: Optional track number, followed by Artist and Title separated by ' - ' or ' _ '
-    # e.g., "01 Grupo Mister - Juego de Amor" -> Artist: Grupo Mister, Title: Juego de Amor
-    pattern = r"^(?:\d+\s*[.\-_]?\s*)?(.+?)\s*[\-_]\s*(.+)$"
+    clean_name = clean_name.strip(' .-_')
+    # Standard delimiters including long dashes
+    pattern = r"^(?:\d+\s*[.\-_]?\s*)?(.+?)\s*[\-_–—]\s*(.+)$"
     match = re.match(pattern, clean_name)
     
     if match:
-        artist = match.group(1).strip()
-        title = match.group(2).strip()
-    else:
-        # Fallback if no delimiter is found
-        artist = "Unknown Artist"
-        title = clean_name
-        
-    return artist, title
+        return match.group(1).strip().title(), match.group(2).strip().title()
+    return "Unknown Artist", clean_name.strip().title()
 
-# 3. Tool Logic
-if st.button("🔄 Refresh Cloud Inventory"):
+# 3. Connection & Logic
+if st.button("🔄 Clear and Refresh Cloud Cache"):
     st.rerun()
 
-st.info("🧬 **Smart Indexing Active**: Crawling Dropbox and parsing filenames for the Gap Mirror.")
-
-# SECURE CONNECTION: Using the Refresh Token from Secrets
 try:
     dbx_config = st.secrets["dropbox"]
     dbx = dropbox.Dropbox(
@@ -51,21 +41,19 @@ try:
         oauth2_refresh_token=dbx_config["refresh_token"]
     )
 except Exception:
-    st.error("Missing Dropbox Credentials. Please check your secrets.toml file.")
+    st.error("Missing Dropbox Credentials in secrets.toml.")
     st.stop()
 
-path_to_scan = st.text_input("Dropbox Folder Path (Leave blank to scan EVERYTHING):", value="")
+path_to_scan = st.text_input("Folder Path (Leave blank for Root):", value="")
 
-if st.button("🚀 Start Cloud Scan"):
-    # KAIZEN: Convert blank input to the root string "" required by Dropbox API
-    formatted_path = "" if path_to_scan.strip() in ["", "/"] else path_to_scan.strip()
-    if not formatted_path.startswith("/") and formatted_path != "":
-        formatted_path = "/" + formatted_path
-
+if st.button("🚀 Start Deep Scan"):
     try:
         files_found = []
-        with st.spinner(f"Indexing {formatted_path if formatted_path != '' else 'Entire Dropbox'}..."):
-            # The API uses "" for root
+        formatted_path = "" if path_to_scan.strip() in ["", "/"] else path_to_scan.strip()
+        if formatted_path and not formatted_path.startswith("/"):
+            formatted_path = "/" + formatted_path
+
+        with st.spinner(f"Crawling {len(formatted_path) if formatted_path else 'Entire Library'}..."):
             res = dbx.files_list_folder(formatted_path, recursive=True)
             
             def process_entries(entries):
@@ -77,42 +65,41 @@ if st.button("🚀 Start Cloud Scan"):
                                 "Name": title,
                                 "Artist": artist,
                                 "Album": "Cloud Library",
-                                "Filename": entry.name,
-                                "Path": entry.path_display
+                                "Raw Filename": entry.name
                             })
 
             process_entries(res.entries)
-            
-            # Handle Large Library Pagination
             while res.has_more:
                 res = dbx.files_list_folder_continue(res.cursor)
                 process_entries(res.entries)
 
             if files_found:
-                df_cloud = pd.DataFrame(files_found)
-                st.success(f"Index Complete: {len(df_cloud)} tracks found in the cloud.")
-                
-                # Metrics Dashboard
-                st.metric("Cloud Library Size", f"{len(df_cloud)} Tracks")
-                
-                # Preview Table
-                st.dataframe(df_cloud[['Name', 'Artist', 'Filename']], use_container_width=True, hide_index=True)
-                
-                # --- EXPORT FOR GAP MIRROR ---
-                st.write("---")
-                st.subheader("📥 Export for Audit")
-                st.caption("Download this CSV and upload it as 'Local Files' in the Gap Mirror tool.")
-                
-                csv_data = df_cloud[['Name', 'Artist', 'Album']].to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 Download Virtual Library CSV",
-                    data=csv_data,
-                    file_name=f"Cloud_Inventory_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            else:
-                st.warning("No music files found. Ensure the path is correct (e.g., /MyMusic).")
-                
+                df = pd.DataFrame(files_found)
+                st.session_state['cloud_inventory'] = df
+                st.success(f"Index Built: {len(df)} tracks categorized.")
+
     except Exception as e:
-        st.error(f"Cloud scan failed: {e}")
+        st.error(f"Scan failed: {e}")
+
+# 4. CLOUD INVENTORY SEARCH & AUDIT
+if 'cloud_inventory' in st.session_state:
+    df = st.session_state['cloud_inventory']
+    
+    st.write("---")
+    st.subheader("🔍 Cloud Library Audit")
+    search_q = st.text_input("Search 45k Library (by Artist or Title):")
+    
+    if search_q:
+        filtered_df = df[df.apply(lambda r: search_q.lower() in str(r).lower(), axis=1)]
+    else:
+        filtered_df = df.head(100) # Show first 100 for speed
+
+    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+    
+    # Gap Mirror Bridge
+    st.download_button(
+        label=f"📥 Download Audit CSV for Gap Mirror ({len(df)} Tracks)",
+        data=df[['Name', 'Artist', 'Album']].to_csv(index=False).encode('utf-8-sig'),
+        file_name=f"Dropbox_Master_Inventory_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
+    )
