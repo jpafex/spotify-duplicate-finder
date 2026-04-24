@@ -54,14 +54,19 @@ except Exception:
     st.error("Missing Dropbox Credentials. Please check your secrets.toml file.")
     st.stop()
 
-path_to_scan = st.text_input("Dropbox Folder Path to Index:", value="/Music")
+path_to_scan = st.text_input("Dropbox Folder Path (Leave blank to scan EVERYTHING):", value="")
 
 if st.button("🚀 Start Cloud Scan"):
+    # KAIZEN: Convert blank input to the root string "" required by Dropbox API
+    formatted_path = "" if path_to_scan.strip() in ["", "/"] else path_to_scan.strip()
+    if not formatted_path.startswith("/") and formatted_path != "":
+        formatted_path = "/" + formatted_path
+
     try:
         files_found = []
-        with st.spinner(f"Indexing {path_to_scan}..."):
-            # Recursive scan
-            res = dbx.files_list_folder(path_to_scan, recursive=True)
+        with st.spinner(f"Indexing {formatted_path if formatted_path != '' else 'Entire Dropbox'}..."):
+            # The API uses "" for root
+            res = dbx.files_list_folder(formatted_path, recursive=True)
             
             def process_entries(entries):
                 for entry in entries:
