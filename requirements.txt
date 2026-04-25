@@ -6,3 +6,5 @@ streamlit-cookies-manager-v2==0.3.1
 openpyxl
 dropbox
 lyricsgenius
+gspread
+google-auth
