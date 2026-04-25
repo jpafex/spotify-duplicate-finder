@@ -87,8 +87,12 @@ if 'cloud_inventory' in st.session_state:
         
         if st.button("🔄 Execute Live Sync"):
             try:
+                # --- KEY REPAIR LOGIC: FIXES PEM ERRORS AUTOMATICALLY ---
+                info = dict(st.secrets["google_gsheets"])
+                info["private_key"] = info["private_key"].replace("\\n", "\n")
+                
                 scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-                creds = Credentials.from_service_account_info(st.secrets["google_gsheets"], scopes=scope)
+                creds = Credentials.from_service_account_info(info, scopes=scope)
                 client = gspread.authorize(creds)
                 
                 sheet = client.open_by_url(sheet_url).get_worksheet(0)
