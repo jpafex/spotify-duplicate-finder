@@ -12,7 +12,7 @@ from afexcloud.layout import bootstrap_page
 st.set_page_config(page_title="Dropbox Bridge | AfexCloud", page_icon="📦", layout="wide")
 bootstrap_page()
 
-st.title("📦 Dropbox Bridge (Multi-Platform Edition)")
+st.title("📦 Dropbox Bridge (Timestamp Edition)")
 st.caption("Windows | Mac | ChromeOS | iOS | 100% Precision Precision")
 
 # 2. Precision Parser
@@ -84,7 +84,7 @@ if 'cloud_inventory' in st.session_state:
     if mode == "Sync to Google Sheets (Live)":
         st.info("💡 Chromebook/iPad Compatible: This pushes the data directly to your live master sheet.")
         
-        # --- NEW DEFAULT URL LOGIC ---
+        # Default URL logic preserved
         use_default = st.checkbox("Use Afex Master Inventory Sheet (Default)", value=True)
         default_url = "https://docs.google.com/spreadsheets/d/1lHZm2gniKaODA60T50oHnMWl-ajZGJ1jkNUtm7TbHbs"
         
@@ -95,7 +95,7 @@ if 'cloud_inventory' in st.session_state:
         
         if st.button("🔄 Execute Live Sync"):
             try:
-                # --- KEY REPAIR LOGIC: FIXES PEM ERRORS AUTOMATICALLY ---
+                # --- KEY REPAIR LOGIC ---
                 info = dict(st.secrets["google_gsheets"])
                 info["private_key"] = info["private_key"].replace("\\n", "\n")
                 
@@ -103,13 +103,20 @@ if 'cloud_inventory' in st.session_state:
                 creds = Credentials.from_service_account_info(info, scopes=scope)
                 client = gspread.authorize(creds)
                 
-                # Strip any #gid parameters for the API call
+                # Strip parameters and open sheet
                 clean_url = sheet_url.split('/edit')[0]
-                
                 sheet = client.open_by_url(clean_url).get_worksheet(0)
+                
+                # Clear and Update Data
                 sheet.clear()
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
-                st.success(f"Success! {len(df)} tracks are now live in Google Sheets.")
+                
+                # --- NEW TIMESTAMP LOGIC ---
+                sync_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Place the timestamp in Cell I1 (Column I, Row 1)
+                sheet.update_acell('I1', f"Last Sync: {sync_time}")
+                
+                st.success(f"Success! {len(df)} tracks are live. Last Sync: {sync_time}")
                 st.balloons()
             except Exception as e:
                 st.error(f"Sync failed: {e}. Ensure the sheet is shared with the service account email.")
