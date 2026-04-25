@@ -83,7 +83,15 @@ if 'cloud_inventory' in st.session_state:
 
     if mode == "Sync to Google Sheets (Live)":
         st.info("💡 Chromebook/iPad Compatible: This pushes the data directly to your live master sheet.")
-        sheet_url = st.text_input("Paste Google Sheet URL:")
+        
+        # --- NEW DEFAULT URL LOGIC ---
+        use_default = st.checkbox("Use Afex Master Inventory Sheet (Default)", value=True)
+        default_url = "https://docs.google.com/spreadsheets/d/1lHZm2gniKaODA60T50oHnMWl-ajZGJ1jkNUtm7TbHbs"
+        
+        if use_default:
+            sheet_url = st.text_input("Target Google Sheet URL:", value=default_url, disabled=True)
+        else:
+            sheet_url = st.text_input("Paste Custom Google Sheet URL:", value="")
         
         if st.button("🔄 Execute Live Sync"):
             try:
@@ -95,13 +103,16 @@ if 'cloud_inventory' in st.session_state:
                 creds = Credentials.from_service_account_info(info, scopes=scope)
                 client = gspread.authorize(creds)
                 
-                sheet = client.open_by_url(sheet_url).get_worksheet(0)
+                # Strip any #gid parameters for the API call
+                clean_url = sheet_url.split('/edit')[0]
+                
+                sheet = client.open_by_url(clean_url).get_worksheet(0)
                 sheet.clear()
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
                 st.success(f"Success! {len(df)} tracks are now live in Google Sheets.")
                 st.balloons()
             except Exception as e:
-                st.error(f"Sync failed: {e}. Did you share the sheet with the service account email?")
+                st.error(f"Sync failed: {e}. Ensure the sheet is shared with the service account email.")
 
     else:
         csv_data = df.to_csv(index=False).encode('utf-8')
