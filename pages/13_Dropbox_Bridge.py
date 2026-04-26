@@ -13,7 +13,7 @@ from afexcloud.layout import bootstrap_page
 st.set_page_config(page_title="Dropbox Bridge | AfexCloud", page_icon="📦", layout="wide")
 bootstrap_page()
 
-st.title("📦 Dropbox Bridge (Nuclear Edition)")
+st.title("📦 Dropbox Bridge (Endgame Edition)")
 st.caption(f"Windows | Mac | ChromeOS | iOS | 59,132 Track Index")
 
 # 2. Precision Parser
@@ -46,7 +46,7 @@ if st.button("🚀 Start Precision Cloud Scan"):
         formatted_path = "" if path_to_scan.strip() in ["", "/"] else path_to_scan.strip()
         if formatted_path and not formatted_path.startswith("/"): formatted_path = "/" + formatted_path
 
-        # Dynamic Spinner Logic
+        # Dynamic Message
         last_count = st.session_state.get('last_track_count', "59,132")
         
         with st.spinner(f"Indexing {last_count} tracks..."):
@@ -82,29 +82,27 @@ if 'cloud_inventory' in st.session_state:
     mode = st.radio("Choose Performance Mode:", ["Sync to Google Sheets (Live)", "Download Local CSV"])
 
     if mode == "Sync to Google Sheets (Live)":
-        st.info("💡 Chromebook/iPad Compatible: This pushes the data directly to your live master sheet.")
-        
         use_default = st.checkbox("Use Afex Master Inventory Sheet (Default)", value=True)
         default_url = "https://docs.google.com/spreadsheets/d/1lHZm2gniKaODA60T50oHnMWl-ajZGJ1jkNUtm7TbHbs"
-        sheet_url = default_url if use_default else st.text_input("Paste Custom Google Sheet URL:", value="")
+        sheet_url = default_url if use_default else st.text_input("Paste Custom Google Sheet URL:")
         
         if st.button("🔄 Execute Live Sync"):
             try:
-                # --- THE NUCLEAR SCRUBBER ---
-                info = dict(st.secrets["google_gsheets"])
-                
-                # Extract the raw key content
-                raw_key = info["private_key"]
-                
-                # 1. Remove the literal header and footer tags temporarily
-                raw_key = raw_key.replace("-----BEGIN PRIVATE KEY-----", "")
-                raw_key = raw_key.replace("-----END PRIVATE KEY-----", "")
-                
-                # 2. Kill all newlines (actual and literal), carriage returns, and spaces
-                clean_base64 = raw_key.replace("\\n", "").replace("\n", "").replace("\r", "").strip()
-                
-                # 3. Rebuild the key with perfect Python-standard newlines
-                info["private_key"] = "-----BEGIN PRIVATE KEY-----\n" + clean_base64 + "\n-----END PRIVATE KEY-----\n"
+                # --- THE ENDGAME BYPASS ---
+                # We pull the keys manually to ensure no TOML quoting mess
+                info = {
+                    "type": st.secrets["google_gsheets"]["type"],
+                    "project_id": st.secrets["google_gsheets"]["project_id"],
+                    "private_key_id": st.secrets["google_gsheets"]["private_key_id"],
+                    "private_key": st.secrets["google_gsheets"]["private_key"].replace("\\n", "\n").strip(),
+                    "client_email": st.secrets["google_gsheets"]["client_email"],
+                    "client_id": st.secrets["google_gsheets"]["client_id"],
+                    "auth_uri": st.secrets["google_gsheets"]["auth_uri"],
+                    "token_uri": st.secrets["google_gsheets"]["token_uri"],
+                    "auth_provider_x509_cert_url": st.secrets["google_gsheets"]["auth_provider_x509_cert_url"],
+                    "client_x509_cert_url": st.secrets["google_gsheets"]["client_x509_cert_url"],
+                    "universe_domain": st.secrets["google_gsheets"]["universe_domain"]
+                }
                 
                 scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
                 creds = Credentials.from_service_account_info(info, scopes=scope)
@@ -115,15 +113,14 @@ if 'cloud_inventory' in st.session_state:
                 sheet.clear()
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
                 
-                # Mountain Time Timestamp
+                # Timestamp
                 mt_zone = pytz.timezone('US/Mountain')
                 sync_time = datetime.now(mt_zone).strftime("%m-%d-%Y %I:%M:%S %p")
                 sheet.update_acell('I1', f"Last Sync (MT): {sync_time}")
                 
-                st.success(f"Success! {len(df)} tracks are live. Last Sync: {sync_time}")
+                st.success(f"Success! {len(df)} tracks live. Last Sync: {sync_time}")
                 st.balloons()
             except Exception as e:
+                # Diagnostic output
                 st.error(f"Sync failed: {e}")
-    else:
-        csv_data = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Master CSV", csv_data, "Afex_Cloud_Inventory.csv", "text/csv")
+                st.info(f"Diagnostic Check: Key Length is {len(st.secrets['google_gsheets']['private_key'])} characters.")
