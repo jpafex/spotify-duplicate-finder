@@ -9,10 +9,10 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 from afexcloud.layout import bootstrap_page
 
-# 1. Page Config - THIS MUST BE THE VERY FIRST STREAMLIT COMMAND
+# 1. Page Config
 st.set_page_config(page_title="Dropbox Bridge | AfexCloud", page_icon="📦", layout="wide")
 
-# 2. Bootstrap Layout - Call this ONLY ONCE to avoid DuplicateElementId
+# 2. Fixed Layout Logic - Prevents DuplicateElementId error
 if "layout_loaded" not in st.session_state:
     bootstrap_page()
     st.session_state["layout_loaded"] = True
@@ -51,7 +51,8 @@ if st.button("🚀 Start Precision Cloud Scan"):
         formatted_path = "" if path_to_scan.strip() in ["", "/"] else path_to_scan.strip()
         if formatted_path and not formatted_path.startswith("/"): formatted_path = "/" + formatted_path
 
-        # Dynamic Message based on your new 59k milestone
+        # --- DYNAMIC MESSAGE LOGIC ---
+        # Defaults to your new 59,132 milestone
         last_count = len(st.session_state['cloud_inventory']) if 'cloud_inventory' in st.session_state else "59,132"
         
         with st.spinner(f"Indexing {last_count} tracks..."):
@@ -86,21 +87,31 @@ if 'cloud_inventory' in st.session_state:
     mode = st.radio("Choose Performance Mode:", ["Sync to Google Sheets (Live)", "Download Local CSV"])
 
     if mode == "Sync to Google Sheets (Live)":
+        st.info("💡 Chromebook/iPad Compatible: This pushes the data directly to your live master sheet.")
+        
+        # --- FIXED DEFAULT URL LOGIC ---
         use_default = st.checkbox("Use Afex Master Inventory Sheet (Default)", value=True)
         default_url = "https://docs.google.com/spreadsheets/d/1lHZm2gniKaODA60T50oHnMWl-ajZGJ1jkNUtm7TbHbs"
-        sheet_url = default_url if use_default else st.text_input("Custom Google Sheet URL:")
+        
+        if use_default:
+            sheet_url = st.text_input("Target Google Sheet URL:", value=default_url, disabled=True)
+        else:
+            sheet_url = st.text_input("Paste Custom Google Sheet URL:", value="")
         
         if st.button("🔄 Execute Live Sync"):
             try:
-                # Key Repair Logic for GSheets
+                # --- AGGRESSIVE KEY REPAIR: KILLS PEM ERROR AT BYTE 1627 ---
                 info = dict(st.secrets["google_gsheets"])
-                info["private_key"] = info["private_key"].replace("\\n", "\n")
+                # This fixes both literal \n and handles hidden trailing spaces
+                info["private_key"] = info["private_key"].replace("\\n", "\n").strip()
                 
                 scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
                 creds = Credentials.from_service_account_info(info, scopes=scope)
                 client = gspread.authorize(creds)
                 
-                sheet = client.open_by_url(sheet_url.split('/edit')[0]).get_worksheet(0)
+                clean_url = sheet_url.split('/edit')[0]
+                sheet = client.open_by_url(clean_url).get_worksheet(0)
+                
                 sheet.clear()
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
                 
