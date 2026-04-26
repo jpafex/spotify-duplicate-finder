@@ -11,16 +11,12 @@ from afexcloud.layout import bootstrap_page
 
 # 1. Page Config
 st.set_page_config(page_title="Dropbox Bridge | AfexCloud", page_icon="📦", layout="wide")
+bootstrap_page()
 
-# 2. Fixed Layout Logic - Prevents DuplicateElementId error
-if "layout_loaded" not in st.session_state:
-    bootstrap_page()
-    st.session_state["layout_loaded"] = True
+st.title("📦 Dropbox Bridge (Dynamic Edition)")
+st.caption("Windows | Mac | ChromeOS | iOS | 59,132 Track Support")
 
-st.title("📦 Dropbox Bridge (Mountain Time Edition)")
-st.caption(f"Windows | Mac | ChromeOS | iOS | 59,132 Track Support")
-
-# 3. Precision Parser
+# 2. Precision Parser
 def parse_music_filename(filename):
     clean_name = os.path.splitext(filename)[0]
     noise = [r'\(.*?\)', r'\[.*?\]', r'feat\..*', r'ft\..*', r'\d{3}k', r'kbps', r'explicit']
@@ -34,7 +30,7 @@ def parse_music_filename(filename):
         return match.group(1).strip(), match.group(2).strip()
     return "Unknown Artist", clean_name.strip()
 
-# 4. Connection
+# 3. Connection
 try:
     dbx_config = st.secrets["dropbox"]
     dbx = dropbox.Dropbox(app_key=dbx_config["app_key"], app_secret=dbx_config["app_secret"], oauth2_refresh_token=dbx_config["refresh_token"])
@@ -42,7 +38,7 @@ except Exception:
     st.error("Check secrets.toml for Dropbox credentials.")
     st.stop()
 
-# 5. Scanning Logic
+# 4. Scanning Logic
 path_to_scan = st.text_input("Folder Path to Map (e.g. /Chilenas):", value="")
 
 if st.button("🚀 Start Precision Cloud Scan"):
@@ -52,8 +48,8 @@ if st.button("🚀 Start Precision Cloud Scan"):
         if formatted_path and not formatted_path.startswith("/"): formatted_path = "/" + formatted_path
 
         # --- DYNAMIC MESSAGE LOGIC ---
-        # Defaults to your new 59,132 milestone
-        last_count = len(st.session_state['cloud_inventory']) if 'cloud_inventory' in st.session_state else "59,132"
+        # If no scan has run yet, it defaults to your new 59,132 milestone
+        last_count = st.session_state.get('last_track_count', "59,132")
         
         with st.spinner(f"Indexing {last_count} tracks..."):
             res = dbx.files_list_folder(formatted_path, recursive=True)
@@ -74,11 +70,12 @@ if st.button("🚀 Start Precision Cloud Scan"):
 
             if files_found:
                 st.session_state['cloud_inventory'] = pd.DataFrame(files_found)
+                st.session_state['last_track_count'] = f"{len(files_found):,}"
                 st.success(f"Index Built: {len(files_found)} tracks identified.")
     except Exception as e:
         st.error(f"Scan failed: {e}")
 
-# 6. THE GOOGLE SHEETS SYNC ENGINE
+# 5. THE GOOGLE SHEETS SYNC ENGINE
 if 'cloud_inventory' in st.session_state:
     df = st.session_state['cloud_inventory']
     st.write("---")
@@ -89,21 +86,23 @@ if 'cloud_inventory' in st.session_state:
     if mode == "Sync to Google Sheets (Live)":
         st.info("💡 Chromebook/iPad Compatible: This pushes the data directly to your live master sheet.")
         
-        # --- FIXED DEFAULT URL LOGIC ---
+        # Hardcoded Default URL Logic
         use_default = st.checkbox("Use Afex Master Inventory Sheet (Default)", value=True)
         default_url = "https://docs.google.com/spreadsheets/d/1lHZm2gniKaODA60T50oHnMWl-ajZGJ1jkNUtm7TbHbs"
-        
-        if use_default:
-            sheet_url = st.text_input("Target Google Sheet URL:", value=default_url, disabled=True)
-        else:
-            sheet_url = st.text_input("Paste Custom Google Sheet URL:", value="")
+        sheet_url = default_url if use_default else st.text_input("Custom Google Sheet URL:")
         
         if st.button("🔄 Execute Live Sync"):
             try:
-                # --- AGGRESSIVE KEY REPAIR: KILLS PEM ERROR AT BYTE 1627 ---
+                # --- THE UNIVERSAL SCRUBBER: KILLS PEM ERROR 1627 ---
                 info = dict(st.secrets["google_gsheets"])
-                # This fixes both literal \n and handles hidden trailing spaces
-                info["private_key"] = info["private_key"].replace("\\n", "\n").strip()
+                # 1. Handle literal \n and real newlines
+                key = info["private_key"].replace("\\n", "\n").strip()
+                # 2. Reconstruct clean header/footer with exact single newlines
+                key = re.sub(r'-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', key)
+                key = re.sub(r'-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', key)
+                # 3. Aggressively remove any hidden spaces/carriage returns from the middle
+                lines = [line.strip() for line in key.split('\n') if line.strip()]
+                info["private_key"] = "\n".join(lines)
                 
                 scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
                 creds = Credentials.from_service_account_info(info, scopes=scope)
@@ -111,11 +110,10 @@ if 'cloud_inventory' in st.session_state:
                 
                 clean_url = sheet_url.split('/edit')[0]
                 sheet = client.open_by_url(clean_url).get_worksheet(0)
-                
                 sheet.clear()
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
                 
-                # --- MOUNTAIN TIME TIMESTAMP ---
+                # --- MOUNTAIN TIME TIMESTAMP (12-HOUR FORMAT) ---
                 mt_zone = pytz.timezone('US/Mountain')
                 sync_time = datetime.now(mt_zone).strftime("%m-%d-%Y %I:%M:%S %p")
                 sheet.update_acell('I1', f"Last Sync (MT): {sync_time}")
