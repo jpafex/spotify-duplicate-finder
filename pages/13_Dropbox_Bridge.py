@@ -13,8 +13,8 @@ from afexcloud.layout import bootstrap_page
 st.set_page_config(page_title="Dropbox Bridge | AfexCloud", page_icon="📦", layout="wide")
 bootstrap_page()
 
-st.title("📦 Dropbox Bridge (Dynamic Edition)")
-st.caption("Windows | Mac | ChromeOS | iOS | 59,132 Track Support")
+st.title("📦 Dropbox Bridge (Nuclear Edition)")
+st.caption(f"Windows | Mac | ChromeOS | iOS | 59,132 Track Index")
 
 # 2. Precision Parser
 def parse_music_filename(filename):
@@ -23,7 +23,6 @@ def parse_music_filename(filename):
     for p in noise:
         clean_name = re.sub(p, '', clean_name, flags=re.IGNORECASE)
     clean_name = clean_name.strip(' .-_')
-    
     pattern = r"^(?:\d+\s*[.\-_]?\s*)?(.+?)\s+[\-_–—]\s+(.+)$"
     match = re.match(pattern, clean_name)
     if match:
@@ -47,8 +46,7 @@ if st.button("🚀 Start Precision Cloud Scan"):
         formatted_path = "" if path_to_scan.strip() in ["", "/"] else path_to_scan.strip()
         if formatted_path and not formatted_path.startswith("/"): formatted_path = "/" + formatted_path
 
-        # --- DYNAMIC MESSAGE LOGIC ---
-        # If no scan has run yet, it defaults to your new 59,132 milestone
+        # Dynamic Spinner Logic
         last_count = st.session_state.get('last_track_count', "59,132")
         
         with st.spinner(f"Indexing {last_count} tracks..."):
@@ -86,23 +84,27 @@ if 'cloud_inventory' in st.session_state:
     if mode == "Sync to Google Sheets (Live)":
         st.info("💡 Chromebook/iPad Compatible: This pushes the data directly to your live master sheet.")
         
-        # Hardcoded Default URL Logic
         use_default = st.checkbox("Use Afex Master Inventory Sheet (Default)", value=True)
         default_url = "https://docs.google.com/spreadsheets/d/1lHZm2gniKaODA60T50oHnMWl-ajZGJ1jkNUtm7TbHbs"
-        sheet_url = default_url if use_default else st.text_input("Custom Google Sheet URL:")
+        sheet_url = default_url if use_default else st.text_input("Paste Custom Google Sheet URL:", value="")
         
         if st.button("🔄 Execute Live Sync"):
             try:
-                # --- THE UNIVERSAL SCRUBBER: KILLS PEM ERROR 1627 ---
+                # --- THE NUCLEAR SCRUBBER ---
                 info = dict(st.secrets["google_gsheets"])
-                # 1. Handle literal \n and real newlines
-                key = info["private_key"].replace("\\n", "\n").strip()
-                # 2. Reconstruct clean header/footer with exact single newlines
-                key = re.sub(r'-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', key)
-                key = re.sub(r'-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', key)
-                # 3. Aggressively remove any hidden spaces/carriage returns from the middle
-                lines = [line.strip() for line in key.split('\n') if line.strip()]
-                info["private_key"] = "\n".join(lines)
+                
+                # Extract the raw key content
+                raw_key = info["private_key"]
+                
+                # 1. Remove the literal header and footer tags temporarily
+                raw_key = raw_key.replace("-----BEGIN PRIVATE KEY-----", "")
+                raw_key = raw_key.replace("-----END PRIVATE KEY-----", "")
+                
+                # 2. Kill all newlines (actual and literal), carriage returns, and spaces
+                clean_base64 = raw_key.replace("\\n", "").replace("\n", "").replace("\r", "").strip()
+                
+                # 3. Rebuild the key with perfect Python-standard newlines
+                info["private_key"] = "-----BEGIN PRIVATE KEY-----\n" + clean_base64 + "\n-----END PRIVATE KEY-----\n"
                 
                 scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
                 creds = Credentials.from_service_account_info(info, scopes=scope)
@@ -113,7 +115,7 @@ if 'cloud_inventory' in st.session_state:
                 sheet.clear()
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
                 
-                # --- MOUNTAIN TIME TIMESTAMP (12-HOUR FORMAT) ---
+                # Mountain Time Timestamp
                 mt_zone = pytz.timezone('US/Mountain')
                 sync_time = datetime.now(mt_zone).strftime("%m-%d-%Y %I:%M:%S %p")
                 sheet.update_acell('I1', f"Last Sync (MT): {sync_time}")
