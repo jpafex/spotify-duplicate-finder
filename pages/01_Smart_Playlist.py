@@ -13,21 +13,21 @@ st.set_page_config(
 st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
 st.markdown("Transform raw client tracklists into seamlessly blended, mathematically optimized event setlists.")
 
-# --- SIDEBAR CONTROLS ---
-st.sidebar.header("Curator Controls")
-st.sidebar.markdown("Adjust algorithmic weighting for the event profile.")
-
-bpm_weight = st.sidebar.slider(
-    "Tempo (BPM) Strictness", 
-    min_value=0.1, max_value=2.0, value=0.5, step=0.1,
-    help="Higher values force songs to stay closer in tempo."
-)
-
-harmonic_penalty_val = st.sidebar.slider(
-    "Key Incompatibility Penalty", 
-    min_value=1, max_value=20, value=10, step=1,
-    help="Higher values heavily penalize non-harmonious key transitions."
-)
+# --- CURATOR CONTROLS (Moved to an Expander on the Main Page) ---
+with st.expander("🎛️ Curator Controls (Click to Adjust Algorithmic Weights)", expanded=True):
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        bpm_weight = st.slider(
+            "Tempo (BPM) Strictness", 
+            min_value=0.1, max_value=2.0, value=1.60, step=0.05,
+            help="Higher values force songs to stay closer in tempo."
+        )
+    with col_c2:
+        harmonic_penalty_val = st.slider(
+            "Key Incompatibility Penalty", 
+            min_value=1, max_value=20, value=13, step=1,
+            help="Higher values heavily penalize non-harmonious key transitions."
+        )
 
 # --- MAIN INTERFACE ---
 uploaded_file = st.file_uploader("Upload Raw Spotify Playlist (.csv)", type=["csv"])
