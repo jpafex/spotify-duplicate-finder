@@ -24,7 +24,7 @@ st.title("📋 Song Lister")
 # Newbie Guide for Mirroring
 with st.expander("🆕 Mirroring Guide", expanded=False):
     st.markdown("""
-    1. **Obtain Playlist** Copy Client Playlist, if you click on playlist link, will open in 
+    1. **Obtain Playlist** Copy Client Playlist link, if you click on playlist link, will open in 
     Spotify. When Playlist is displayed in your account, since you don't own the playlist, 
     Use the 3 dots ..., or menu, look for "Add to Your Library." Once added proceed to next step.
     2. **Export** any client playlist via [Exportify.net](https://exportify.net/).
