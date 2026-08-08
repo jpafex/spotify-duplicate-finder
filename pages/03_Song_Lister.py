@@ -26,7 +26,7 @@ with st.expander("🆕 Mirroring Guide", expanded=False):
     st.markdown("""
     1. **Obtain Playlist** Copy Client Playlist link, if you click on playlist link, will open in 
     Spotify. When Playlist is displayed in your account, since you don't own the playlist, 
-    Use the 3 dots ..., or menu, look for "Add to Your Library." Once added proceed to next step.
+    Use the 3 dots ... in Spotify, or Spotify menu, look for "Add to Your Library." Once added proceed to next step.
     2. **Export** any client playlist via [Exportify.net](https://exportify.net/).
     3. **Upload** the CSV below to see BPM and assign Position numbers.
     4. **Mirror**: Click the push button to create a copy on your own account for full API access.
