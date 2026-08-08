@@ -28,7 +28,7 @@ with st.expander("🆕 Mirroring Guide", expanded=False):
     Spotify. When Playlist is displayed in your account, since you don't own the playlist, 
     Use the 3 dots ... in Spotify, or Spotify menu, look for "Add to Your Library." Once added proceed to next step.
     2. **Export** any client playlist via [Exportify.net](https://exportify.net/). Once in Exportify.net webpage, you
-    will see all the playlist that you own, only the one's you own display.
+    will see all the playlist that you own, only the one's you own display. Select the playlist to export for CSV file.
     3. **Upload** the CSV below to see BPM and assign Position numbers.
     4. **Mirror**: Click the push button to create a copy on your own account for full API access.
     """)
