@@ -6,8 +6,8 @@ import os  # <--- Make sure this line is at the very top!
 # Path Fix for accessing auth.py
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import auth functions
-from auth import is_logged_in, show_login_form
+# Import the same bootstrap used in 03_Song_Lister
+from afexcloud.layout import bootstrap_page
 
 # Page Configuration
 st.set_page_config(
@@ -16,10 +16,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- AUTHENTICATION CHECK ---
-if not is_logged_in():
-    show_login_form()
-    st.stop()  # <--- Stop execution if not logged in
+# --- AUTHENTICATION via bootstrap_page (handles login redirect) ---
+bootstrap_page()   # This will block if not logged in; no need to capture return
 
 # App Header
 st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
