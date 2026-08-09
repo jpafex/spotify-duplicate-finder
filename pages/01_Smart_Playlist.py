@@ -1,6 +1,13 @@
 import streamlit as st
 import pandas as pd
+import sys 
 import os  # <--- Make sure this line is at the very top!
+
+# Path Fix for accessing auth.py
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import auth functions
+from auth import is_logged_in, show_login_form
 
 # Page Configuration
 st.set_page_config(
@@ -8,6 +15,11 @@ st.set_page_config(
     page_icon="🎧", 
     layout="wide"
 )
+
+# --- AUTHENTICATION CHECK ---
+if not is_logged_in():
+    show_login_form()
+    st.stop()  # <--- Stop execution if not logged in
 
 # App Header
 st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
