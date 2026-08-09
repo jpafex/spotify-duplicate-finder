@@ -8,6 +8,22 @@ def show_login_form() -> bool:
     if is_logged_in():
         return True
 
+    # --- Restore input field borders (global fix) ---
+    st.markdown("""
+    <style>
+    div[data-testid="stTextInput"] input {
+        border: 1px solid #cccccc !important;
+        border-radius: 4px !important;
+        padding: 0.5rem !important;
+        background-color: white !important;
+    }
+    div[data-testid="stTextInput"] input:focus {
+        border-color: #ff4b4b !important;
+        box-shadow: 0 0 0 0.2rem rgba(255, 75, 75, 0.25) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.title("🔐 AfexCloud Tool Login")
     with st.form("login_form"):
         u = st.text_input("Username")
