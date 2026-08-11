@@ -9,6 +9,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import the same bootstrap used in 03_Song_Lister
 from afexcloud.layout import bootstrap_page
 
+# --- Spotify availability check ---
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+    SPOTIPY_AVAILABLE = True
+except ImportError:
+    SPOTIPY_AVAILABLE = False
+
 # Page Configuration
 st.set_page_config(
     page_title="ProDJ Smart Playlist Generator", 
