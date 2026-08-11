@@ -28,34 +28,48 @@ st.set_page_config(
 st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
 st.markdown("Transform raw client tracklists into seamlessly blended, mathematically optimized event setlists.")
 
-# --- Spotify client (cached) ---
-@st.cache_resource
+# --- Spotify client authentication (Web Flow) ---
 def get_spotify_client():
-    """Return an authenticated Spotify client using st.secrets or env vars."""
+    """Return an authenticated Spotify client handling Streamlit web OAuth."""
     if not SPOTIPY_AVAILABLE:
         return None
     
-    # Try to read from st.secrets first, fallback to env vars (spotipy reads them automatically)
     client_id = st.secrets.get("spotify", {}).get("client_id")
     client_secret = st.secrets.get("spotify", {}).get("client_secret")
     redirect_uri = st.secrets.get("spotify", {}).get("redirect_uri", "http://localhost:8501")
     
-    if client_id and client_secret:
-        auth_manager = SpotifyOAuth(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri,
-            scope="playlist-modify-public playlist-modify-private",
-            cache_path=".spotify_cache"  # stores token locally
-        )
+    if not (client_id and client_secret):
+        st.error("Spotify credentials missing from st.secrets.")
+        return None
+
+    # Crucial change: open_browser=False prevents server hangs
+    sp_oauth = SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope="playlist-modify-public playlist-modify-private",
+        cache_path=".spotify_cache",
+        open_browser=False 
+    )
+
+    # 1. Check if Spotify just redirected back to our app with a login code
+    code = st.query_params.get("code")
+    if code:
+        sp_oauth.get_access_token(code)
+        # Clear the URL parameters so it doesn't get stuck in a loop
+        st.query_params.clear()
+
+    # 2. Check if we now have a valid cached token
+    token_info = sp_oauth.get_cached_token()
+
+    if not token_info:
+        # 3. If no token, generate the login link for the user to click
+        auth_url = sp_oauth.get_authorize_url()
+        return {"status": "unauthorized", "auth_url": auth_url}
     else:
-        # Rely on environment variables SPOTIPY_CLIENT_ID, etc.
-        auth_manager = SpotifyOAuth(
-            scope="playlist-modify-public playlist-modify-private",
-            cache_path=".spotify_cache"
-        )
-    
-    return spotipy.Spotify(auth_manager=auth_manager)
+        # 4. We are authorized! Return the active client.
+        return {"status": "authorized", "client": spotipy.Spotify(auth_manager=sp_oauth)}
+
 
 # --- CURATOR CONTROLS ---
 with st.expander("🎛️ Curator Controls (Click to Adjust Algorithmic Weights)", expanded=True):
@@ -191,65 +205,60 @@ if uploaded_file is not None:
         if not SPOTIPY_AVAILABLE:
             st.warning("⚠️ `spotipy` is not installed. Run `pip install spotipy` to enable Spotify upload.")
         else:
-            # Allow user to edit playlist name (pre-filled with the dynamic name)
             spotify_playlist_name = st.text_input(
                 "Playlist name on Spotify",
                 value=file_name_dynamic.replace(".csv", ""),
                 help="This name will appear in your Spotify library."
             )
             
-            col_upload, col_status = st.columns([1, 3])
-            with col_upload:
+            # Initialize the client check
+            spotify_status = get_spotify_client()
+            
+            if spotify_status and spotify_status["status"] == "unauthorized":
+                st.warning("You must link your Spotify account to upload playlists.")
+                st.markdown(f'**[🔗 Click here to Authorize Spotify]({spotify_status["auth_url"]})**')
+                st.caption("After authorizing, you will be redirected back here to complete the upload.")
+                
+            elif spotify_status and spotify_status["status"] == "authorized":
+                sp = spotify_status["client"]
+                
                 if st.button("📤 Create Spotify Playlist", type="secondary"):
-                    with st.spinner("Authenticating with Spotify and creating playlist..."):
+                    with st.spinner("Communicating with Spotify..."):
                         try:
-                            sp = get_spotify_client()
-                            if sp is None:
-                                st.error("Could not initialise Spotify client. Check credentials.")
+                            # Get current user ID
+                            user_info = sp.me()
+                            user_id = user_info["id"]
+                            
+                            # Create playlist
+                            playlist = sp.user_playlist_create(
+                                user=user_id,
+                                name=spotify_playlist_name,
+                                public=True,
+                                description="Generated by ProDJ Harmonic Flow Engine"
+                            )
+                            playlist_id = playlist["id"]
+                            
+                            # Extract track IDs from URIs
+                            track_ids = []
+                            for uri in result_df["Track URI"]:
+                                if isinstance(uri, str) and uri.startswith("spotify:track:"):
+                                    track_id = uri.split(":")[-1]
+                                    track_ids.append(track_id)
+                            
+                            if not track_ids:
+                                st.error("No valid track URIs found. Cannot create playlist.")
                             else:
-                                # Get current user ID
-                                user_info = sp.me()
-                                user_id = user_info["id"]
+                                # Add tracks in batches of 100
+                                for i in range(0, len(track_ids), 100):
+                                    batch = track_ids[i:i+100]
+                                    sp.playlist_add_items(playlist_id, batch)
                                 
-                                # Create playlist
-                                playlist = sp.user_playlist_create(
-                                    user=user_id,
-                                    name=spotify_playlist_name,
-                                    public=True,
-                                    description="Generated by ProDJ Harmonic Flow Engine"
-                                )
-                                playlist_id = playlist["id"]
+                                playlist_url = playlist["external_urls"]["spotify"]
+                                st.success(f"✅ Playlist **{spotify_playlist_name}** created successfully!")
+                                st.markdown(f"**[🎵 Open your new playlist in Spotify]({playlist_url})**")
                                 
-                                # Extract track IDs from URIs
-                                track_ids = []
-                                for uri in result_df["Track URI"]:
-                                    if isinstance(uri, str) and uri.startswith("spotify:track:"):
-                                        track_id = uri.split(":")[-1]
-                                        track_ids.append(track_id)
-                                    else:
-                                        st.warning(f"Skipping invalid URI: {uri}")
-                                
-                                if not track_ids:
-                                    st.error("No valid track URIs found. Cannot create playlist.")
-                                else:
-                                    # Add tracks in batches of 100
-                                    for i in range(0, len(track_ids), 100):
-                                        batch = track_ids[i:i+100]
-                                        sp.playlist_add_items(playlist_id, batch)
-                                    
-                                    playlist_url = playlist["external_urls"]["spotify"]
-                                    st.success(f"✅ Playlist **{spotify_playlist_name}** created successfully!")
-                                    st.markdown(f"🔗 [Open in Spotify]({playlist_url})")
-                                    
-                                    # Optional: show playlist ID
-                                    st.caption(f"Playlist ID: `{playlist_id}`")
                         except Exception as e:
                             st.error(f"Upload failed: {e}")
-                            st.info("Make sure your Spotify credentials are correct and the redirect URI matches your Spotify App settings.")
-            
-            with col_status:
-                st.caption("You will be redirected to Spotify to authorise the app (only the first time).")
-                st.caption("The playlist will be added to your Spotify library.")
 
 else:
     st.info("👆 Upload your raw Spotify CSV file above to begin.")
