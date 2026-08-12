@@ -157,7 +157,7 @@ def get_auth_manager() -> SpotifyOAuth:
         open_browser=False,
         cache_handler=cache_handler,
         state=st.session_state["spotify_oauth_state"],
-        show_dialog=False,
+        show_dialog=True,
     )
 
 
