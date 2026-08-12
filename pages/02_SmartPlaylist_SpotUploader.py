@@ -287,14 +287,17 @@ if uploaded_file is not None:
                             )
                             playlist_id = playlist["id"]
                             
-                            # Extract track URIs (Spotify now strictly requires the full URI string)
+                           # Extract track URIs (Safely finding the column regardless of capitalization)
+                            uri_col = next((col for col in result_df.columns if "uri" in str(col).lower()), None)
+                            
                             track_uris = []
-                            for uri in result_df["Track URI"]:
-                                if isinstance(uri, str) and uri.startswith("spotify:track:"):
-                                    track_uris.append(uri)
+                            if uri_col:
+                                for uri in result_df[uri_col]:
+                                    if isinstance(uri, str) and uri.startswith("spotify:track:"):
+                                        track_uris.append(uri)
                             
                             if not track_uris:
-                                st.error("No valid track URIs found. Cannot create playlist.")
+                                st.error("No valid track URIs found. Cannot create playlist. Please ensure your CSV contains Spotify URIs.")
                             else:
                                 # Add tracks in batches of 100
                                 for i in range(0, len(track_uris), 100):
