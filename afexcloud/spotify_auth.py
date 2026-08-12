@@ -7,13 +7,12 @@ def get_auth_manager():
     scope = "playlist-modify-public playlist-modify-private playlist-read-private user-library-read"
     
     return SpotifyOAuth(
-        client_id=st.secrets["SPOTIFY_CLIENT_ID"],
-        client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"],
-        redirect_uri=st.secrets["SPOTIFY_REDIRECT_URI"],
-        scope=scope,
-        open_browser=False,
-        cache_path=".cache-token"
-    )
+    client_id=st.secrets["SPOTIFY_CLIENT_ID"],
+    client_secret=st.secrets["SPOTIFY_CLIENT_SECRET"],
+    redirect_uri=st.secrets["SPOTIFY_REDIRECT_URI"],
+    scope="playlist-modify-public playlist-modify-private playlist-read-private",
+    show_dialog=True # Forces a clean handshake UI if their old session died
+)
 
 def handle_spotify_callback(auth_manager):
     """Captures the 'code' from the URL after the Lark clicks 'Agree'."""
