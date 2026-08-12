@@ -59,15 +59,25 @@ def get_spotify_client():
         # Clear the URL parameters so it doesn't get stuck in a loop
         st.query_params.clear()
 
-    # 2. Check if we now have a valid cached token
-    token_info = sp_oauth.get_cached_token()
+    # 2. THE 2026 SAFEGUARD: Catch the 6-month expiration error
+    try:
+        token_info = sp_oauth.get_cached_token()
+    except Exception as e:
+        if "invalid_grant" in str(e).lower():
+            # 3. Discard the expired token immediately
+            if os.path.exists(".spotify_cache"):
+                os.remove(".spotify_cache")
+            token_info = None
+        else:
+            st.error(f"Spotify token validation failed: {e}")
+            token_info = None
 
     if not token_info:
-        # 3. If no token, generate the login link for the user to click
+        # 4. If no token, generate the login link for the user to click
         auth_url = sp_oauth.get_authorize_url()
         return {"status": "unauthorized", "auth_url": auth_url}
     else:
-        # 4. We are authorized! Return the active client.
+        # 5. We are authorized! Return the active client.
         return {"status": "authorized", "client": spotipy.Spotify(auth_manager=sp_oauth)}
 
 
