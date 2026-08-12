@@ -28,61 +28,73 @@ st.set_page_config(
 st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
 st.markdown("Transform raw client tracklists into seamlessly blended, mathematically optimized event setlists.")
 
-# --- Spotify client authentication (Shared Session) ---
+# --- Spotify client authentication (Universal Session Link) ---
+from spotipy.cache_handler import CacheHandler
+import json
+
+class UniversalCacheHandler(CacheHandler):
+    """Bridges the gap between the Main App's memory and local file caches."""
+    def get_cached_token(self):
+        # 1. Check the Main App's session state memory
+        if st.session_state.get("spotify_token_info"):
+            return st.session_state["spotify_token_info"]
+        
+        # 2. Fallback to the default .cache file (used by spotify_auth.py)
+        try:
+            if os.path.exists(".cache"):
+                with open(".cache", "r") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return None
+
+    def save_token_to_cache(self, token_info):
+        st.session_state["spotify_token_info"] = token_info
+        try:
+            with open(".cache", "w") as f:
+                json.dump(token_info, f)
+        except Exception:
+            pass
+
 def get_spotify_client():
-    """Piggyback on the Main Dashboard's active Spotify connection."""
+    """Connects to Spotify using whichever token the Main App already secured."""
     if not SPOTIPY_AVAILABLE:
         return None
     
-    # Check if the Main App has already authenticated and stored the token in memory
-    token_info = st.session_state.get("spotify_token_info")
+    client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
+    client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+    redirect_uri = st.secrets.get("SPOTIFY_REDIRECT_URI", "http://localhost:8501")
     
-    if token_info and "access_token" in token_info:
-        # We are authorized! Rebuild the client using the main app's token.
-        sp = spotipy.Spotify(auth=token_info["access_token"])
-        return {"status": "authorized", "client": sp}
-    else:
-        # Not authorized. We will direct them to the main page to connect.
+    if not (client_id and client_secret):
         return {"status": "unauthorized"}
-            
-    # Crucial change: open_browser=False prevents server hangs
+
+    # Build the auth manager using our custom bridge handler
     sp_oauth = SpotifyOAuth(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope="playlist-modify-public playlist-modify-private",
-        cache_path=".spotify_cache",
+        scope="playlist-modify-public playlist-modify-private playlist-read-private",
+        cache_handler=UniversalCacheHandler(),
         open_browser=False 
     )
 
-   # 1. Check if Spotify just redirected back to our app with a login code
-    code = st.query_params.get("code")
-    if code:
-        sp_oauth.get_access_token(code)
-        # Clear the URL parameters so it doesn't get stuck in a loop
-        st.query_params.clear()
-        st.rerun() # <--- ADD THIS: Forces the app to instantly refresh and log you in
-
-    # 2. THE 2026 SAFEGUARD: Catch the 6-month expiration error
+    # Ask the auth manager to validate the token using the bridge
     try:
         token_info = sp_oauth.get_cached_token()
     except Exception as e:
         if "invalid_grant" in str(e).lower():
-            # 3. Discard the expired token immediately
-            if os.path.exists(".spotify_cache"):
-                os.remove(".spotify_cache")
-            token_info = None
-        else:
-            st.error(f"Spotify token validation failed: {e}")
-            token_info = None
+            # 2026 Safeguard: Clear memory if token is older than 6 months
+            st.session_state["spotify_token_info"] = None
+            if os.path.exists(".cache"):
+                os.remove(".cache")
+        token_info = None
 
-    if not token_info:
-        # 4. If no token, generate the login link for the user to click
-        auth_url = sp_oauth.get_authorize_url()
-        return {"status": "unauthorized", "auth_url": auth_url}
+    if token_info:
+        # Authorized! Return a fully built client capable of auto-refreshing
+        sp = spotipy.Spotify(auth_manager=sp_oauth)
+        return {"status": "authorized", "client": sp}
     else:
-        # 5. We are authorized! Return the active client.
-        return {"status": "authorized", "client": spotipy.Spotify(auth_manager=sp_oauth)}
+        return {"status": "unauthorized"}
 
 # --- CURATOR CONTROLS ---
 with st.expander("🎛️ Curator Controls (Click to Adjust Algorithmic Weights)", expanded=True):
