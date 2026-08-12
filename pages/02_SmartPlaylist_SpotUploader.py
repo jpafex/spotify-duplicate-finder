@@ -29,14 +29,16 @@ st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
 st.markdown("Transform raw client tracklists into seamlessly blended, mathematically optimized event setlists.")
 
 # --- Spotify client authentication (Web Flow) ---
+# --- Spotify client authentication (Web Flow) ---
 def get_spotify_client():
     """Return an authenticated Spotify client handling Streamlit web OAuth."""
     if not SPOTIPY_AVAILABLE:
         return None
     
-    client_id = st.secrets.get("spotify", {}).get("client_id")
-    client_secret = st.secrets.get("spotify", {}).get("client_secret")
-    redirect_uri = st.secrets.get("spotify", {}).get("redirect_uri", "http://localhost:8501")
+    # UPDATED: Match the exact keys used in your secrets.toml
+    client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
+    client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
+    redirect_uri = st.secrets.get("SPOTIFY_REDIRECT_URI", "http://localhost:8501")
     
     if not (client_id and client_secret):
         st.error("Spotify credentials missing from st.secrets.")
@@ -79,7 +81,6 @@ def get_spotify_client():
     else:
         # 5. We are authorized! Return the active client.
         return {"status": "authorized", "client": spotipy.Spotify(auth_manager=sp_oauth)}
-
 
 # --- CURATOR CONTROLS ---
 with st.expander("🎛️ Curator Controls (Click to Adjust Algorithmic Weights)", expanded=True):
