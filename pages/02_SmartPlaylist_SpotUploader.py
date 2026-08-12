@@ -28,21 +28,22 @@ st.set_page_config(
 st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
 st.markdown("Transform raw client tracklists into seamlessly blended, mathematically optimized event setlists.")
 
-# --- Spotify client authentication (Web Flow) ---
-# --- Spotify client authentication (Web Flow) ---
+# --- Spotify client authentication (Shared Session) ---
 def get_spotify_client():
-    """Return an authenticated Spotify client handling Streamlit web OAuth."""
+    """Piggyback on the Main Dashboard's active Spotify connection."""
     if not SPOTIPY_AVAILABLE:
         return None
     
-    # UPDATED: Match the exact keys used in your secrets.toml
-    client_id = st.secrets.get("SPOTIFY_CLIENT_ID")
-    client_secret = st.secrets.get("SPOTIFY_CLIENT_SECRET")
-    redirect_uri = st.secrets.get("SPOTIFY_REDIRECT_URI", "http://localhost:8501")
+    # Check if the Main App has already authenticated and stored the token in memory
+    token_info = st.session_state.get("spotify_token_info")
     
-    if not (client_id and client_secret):
-        st.error("Spotify credentials missing from st.secrets.")
-        return None
+    if token_info and "access_token" in token_info:
+        # We are authorized! Rebuild the client using the main app's token.
+        sp = spotipy.Spotify(auth=token_info["access_token"])
+        return {"status": "authorized", "client": sp}
+    else:
+        # Not authorized. We will direct them to the main page to connect.
+        return {"status": "unauthorized"}
             
     # Crucial change: open_browser=False prevents server hangs
     sp_oauth = SpotifyOAuth(
@@ -220,7 +221,7 @@ if uploaded_file is not None:
             mime="text/csv"
         )
         
-        # --- SPOTIFY UPLOAD SECTION ---
+        # --- NEW: SPOTIFY UPLOAD SECTION ---
         st.subheader("☁️ Upload to Spotify")
         if not SPOTIPY_AVAILABLE:
             st.warning("⚠️ `spotipy` is not installed. Run `pip install spotipy` to enable Spotify upload.")
@@ -233,8 +234,8 @@ if uploaded_file is not None:
             
             if spotify_status and spotify_status["status"] == "unauthorized":
                 st.warning("You must link your Spotify account to upload playlists.")
-                st.markdown(f'**[🔗 Click here to Authorize Spotify]({spotify_status["auth_url"]})**')
-                st.caption("After authorizing, you will be redirected back here to complete the upload.")
+                # Redirect the user to the central login point
+                st.info("👈 **Action Required:** Please navigate to the **Main Dashboard (Home)**, click 'Connect Spotify' in the sidebar, and then return to this page.")
                 
             elif spotify_status and spotify_status["status"] == "authorized":
                 sp = spotify_status["client"]
