@@ -213,8 +213,42 @@ def handle_spotify_callback(auth_manager: SpotifyOAuth) -> None:
 
 
 def get_valid_token_info(auth_manager: SpotifyOAuth):
-    token_info = auth_manager.cache_handler.get_cached_token()
-    return auth_manager.validate_token(token_info)
+    """
+    Checks if a valid token exists, handles automatic background refreshes,
+    and safely discards expired tokens to prevent 2026 invalid_grant crashes.
+    """
+    try:
+        # 1. Attempt to grab and validate the cached token
+        # (Spotipy naturally attempts a background refresh here if expired)
+        token_info = auth_manager.get_cached_token()
+       
+        if token_info:
+            return token_info
+           
+    except Exception as e:
+        # 2. THE 2026 SAFEGUARD: Catch the 6-month expiration error [cite: 3, 5]
+        if "invalid_grant" in str(e).lower():
+            st.warning("🔄 Your 6-month Spotify access has expired. Clearing dead session...")
+           
+            # 3. Discard the expired token immediately [cite: 4, 6]
+            if "spotify_token" in st.session_state:
+                st.session_state["spotify_token"] = None
+               
+            # If your app uses a local cache file, wipe it clean [cite: 4, 6]
+            try:
+                if os.path.exists(".cache"):
+                    os.remove(".cache")
+            except Exception:
+                pass
+               
+            # Return None so the app knows it must show the login button
+            return None
+        else:
+            # Pass along any unrelated network or API errors
+            st.error(f"Spotify token validation failed: {e}")
+            return None
+           
+    return None
 
 
 # ----------------------------
