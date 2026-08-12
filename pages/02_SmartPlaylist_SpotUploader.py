@@ -112,6 +112,27 @@ with st.expander("🎛️ Curator Controls (Click to Adjust Algorithmic Weights)
             help="Higher values heavily penalize non-harmonious key transitions."
         )
 
+    # --- THE NUCLEAR DISCONNECT BUTTON ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("🛠️ Server Troubleshooting")
+if st.sidebar.button("💥 Nuke Spotify Server Cache"):
+    # 1. Clear Streamlit's temporary memory
+    st.session_state["spotify_token_info"] = None
+    if "spotify_oauth_state" in st.session_state:
+        del st.session_state["spotify_oauth_state"]
+        
+    # 2. Hunt down and destroy the physical files on the server disk
+    cache_files_destroyed = 0
+    for cache_file in [".cache", ".spotify_cache"]:
+        if os.path.exists(cache_file):
+            try:
+                os.remove(cache_file)
+                cache_files_destroyed += 1
+            except Exception as e:
+                st.sidebar.error(f"Failed to delete {cache_file}: {e}")
+                
+    st.sidebar.success(f"Obliterated {cache_files_destroyed} ghost files! Refresh the page and log in via the Main Dashboard.")
+
     # --- INITIALIZE SPOTIFY EARLY ---
 # Catch the redirect code immediately, outside of any buttons
 spotify_status = get_spotify_client()
