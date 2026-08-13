@@ -24,6 +24,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- AUTHENTICATION via bootstrap_page (handles login redirect) ---
+bootstrap_page()   # <-- Add this line
+
+
 # App Header
 st.title("🎧 ProDJ Enterprise Harmonic Flow Engine")
 st.markdown("Transform raw client tracklists into seamlessly blended, mathematically optimized event setlists.")
