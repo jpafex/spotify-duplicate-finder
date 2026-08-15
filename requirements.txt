@@ -9,3 +9,4 @@ lyricsgenius
 gspread
 google-auth
 pytz
+mutagen
